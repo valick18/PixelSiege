@@ -11,6 +11,9 @@ mono_crash.*.json
 build/
 export/
 bin/
+_tools/*.exe
+_tools/*.zip
+*.exe
 
 # OS and temporary files
 .DS_Store
