@@ -23,6 +23,7 @@ const BuildingS = preload("res://scripts/managers/BuildingManager.gd")
 const FireS = preload("res://scripts/managers/FireExplosionSystem.gd")
 const FlagS = preload("res://scripts/managers/FlagManager.gd")
 const SaveS = preload("res://scripts/managers/SaveManager.gd")
+const PhysS = preload("res://scripts/managers/WorldPhysics.gd")
 const CraftUIS = preload("res://scripts/ui/craft_ui.gd")
 const InvUIS = preload("res://scripts/ui/inventory_ui.gd")
 const TeamUIS = preload("res://scripts/ui/team_select.gd")
@@ -38,6 +39,8 @@ var building
 var fire_sys
 var flags_mgr
 var saver
+var physics
+var falling := {}     # усі: id -> {p, vy, b, hit} (падаючі блоки)
 var st := {}          # host: id -> стан гравця
 var cl := {}          # усі: id -> {hp, inv, dead}
 var edits := {}       # cell -> [block, team]
@@ -106,6 +109,7 @@ func _ready() -> void:
 	fire_sys = _mgr(FireS, "FireExplosionSystem")
 	flags_mgr = _mgr(FlagS, "FlagManager")
 	saver = _mgr(SaveS, "SaveManager")
+	physics = _mgr(PhysS, "WorldPhysics")
 	_build_hud()
 	Net.players_changed.connect(_sync_player_nodes)
 	_start_match(Net.world_seed, Net.map_size)
@@ -161,7 +165,12 @@ func note_to(target: int, text: String) -> void:
 
 
 func send_edits(list: Array) -> void:
+	var olds := []
+	for e in list:
+		olds.append(world.get_cell(e[0]))
 	c_edits.rpc(list)
+	if multiplayer.is_server():
+		physics.after_edits(list, olds)
 
 
 # Видаляє клітинки (двері видаляються цілком: нижня + верхня клітинка).
@@ -214,6 +223,8 @@ func _start_match(seed_value: int, size: int) -> void:
 	arrow_meta.clear()
 	cracks.clear()
 	building.reset()
+	physics.reset()
+	falling.clear()
 	store = [{"wood": 0, "stone": 0, "metal": 0}, {"wood": 0, "stone": 0, "metal": 0}]
 	score = [0, 0]
 	winner = -1
@@ -584,9 +595,13 @@ func c_tp(id: int, pos: Vector2) -> void:
 
 @rpc("authority", "call_local", "reliable")
 func c_edits(list: Array) -> void:
+	var noisy := false
 	for e in list:
-		if e[1] == 0 and fx.size() < 150:
-			var old: int = world.get_cell(e[0])
+		var old: int = world.get_cell(e[0])
+		var watery: bool = e[1] == world.WATER or old == world.WATER
+		if not watery:
+			noisy = true
+		if e[1] == 0 and fx.size() < 150 and not watery:
 			if old != 0:
 				var dc: Color = world.COLORS.get(old, Color.GRAY)
 				for k in 3:
@@ -594,7 +609,7 @@ func c_edits(list: Array) -> void:
 		edits[e[0]] = [e[1], e[2]]
 		cracks.erase(e[0])
 		world.set_cell(e[0], e[1], e[2])
-	if not list.is_empty():
+	if noisy:
 		Net.play("place" if list[0][1] != 0 else "dig")
 
 
@@ -746,6 +761,16 @@ func c_dmg(pos: Vector2, n: int) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
+func c_fall(fid: int, pos: Vector2, b: int) -> void:
+	falling[fid] = {"p": pos, "vy": 0.0, "b": b, "hit": {}}
+
+
+@rpc("authority", "call_local", "reliable")
+func c_fall_end(fid: int) -> void:
+	falling.erase(fid)
+
+
+@rpc("authority", "call_local", "reliable")
 func new_match(seed_value: int) -> void:
 	Net.world_seed = seed_value
 	_start_match(seed_value, Net.map_size)
@@ -807,6 +832,7 @@ func _physics_process(dt: float) -> void:
 			e.a += Vector2(0, -28.0 * dt)
 	fx = fx.filter(func(e): return e.t > 0.0)
 	combat.sim(dt)
+	physics.sim_falling(dt)
 	if not multiplayer.is_server():
 		return
 	var t := now()
@@ -828,6 +854,7 @@ func _physics_process(dt: float) -> void:
 	combat.tick(dt)
 	building.tick(dt)
 	saver.tick(dt)
+	physics.tick(dt)
 	t_pick += dt
 	if t_pick >= 0.2:
 		t_pick = 0.0
@@ -1007,6 +1034,9 @@ func _draw_fx() -> void:
 				ci.draw_line(tail, a.p, Color(0.85, 0.7, 0.45), 1.2)
 				ci.draw_line(a.p - dv * 2.5, a.p, Color(0.9, 0.92, 0.95), 2.0)
 				ci.draw_line(tail, tail + dv * 2.0 + dv.orthogonal() * 1.5, Color(0.95, 0.95, 0.95), 1.0)
+	for fid in falling:
+		var fb: Dictionary = falling[fid]
+		_draw_block(ci, int(fb.b), Rect2(fb.p - Vector2(8, 8), Vector2(T, T)))
 	for e in fx:
 		match e.k:
 			"slash":
@@ -1044,6 +1074,21 @@ func _draw_fx() -> void:
 				nc.a = clampf(e.t * 2.0, 0.0, 1.0)
 				ci.draw_string_outline(font, e.a - Vector2(20, 0), txt, HORIZONTAL_ALIGNMENT_CENTER, 40, 9, 3, Color(0, 0, 0, nc.a))
 				ci.draw_string(font, e.a - Vector2(20, 0), txt, HORIZONTAL_ALIGNMENT_CENTER, 40, 9, nc)
+
+
+func _draw_block(ci: CanvasItem, b: int, r: Rect2) -> void:
+	if b == world.DIRT and world.tex_dirt:
+		ci.draw_texture_rect_region(world.tex_dirt, r, Rect2(15 * 64, 64, 16, 16))
+	elif (b == world.STONE or b == world.ORE) and world.tex_stone:
+		ci.draw_texture_rect_region(world.tex_stone, r, Rect2(15 * 64, 0, 16, 16))
+		if b == world.ORE and world.tex_ore:
+			ci.draw_texture_rect_region(world.tex_ore, r, Rect2(0, 0, 16, 16))
+	elif b >= world.WATER:
+		LookS.draw_block_shape(ci, b, r, Color(0.6, 0.6, 0.6), now(), true)
+	elif world.atlas:
+		ci.draw_texture_rect_region(world.atlas, r, Rect2(b * 16, 0, 16, 16))
+	else:
+		ci.draw_rect(r, world.COLORS.get(b, Color.WHITE))
 
 
 # ------------------------------------------------------------ HUD і вікна

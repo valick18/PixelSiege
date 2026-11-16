@@ -110,6 +110,10 @@ func shoot(id: int, dir: Vector2, charge: float) -> void:
 	if now < s.atk:
 		return
 	var td: Dictionary = Net.TOOLS.bow
+	if InvS.take(s.inv, "arrow", 1) == 0:
+		g.note_to(id, "No arrows! Craft them (C) or pick them up")
+		return
+	g.push_state(id)
 	s.atk = now + float(td.cd) * 0.85
 	var k := clampf(charge, 0.15, 1.0)
 	dir = dir.normalized()
@@ -207,6 +211,9 @@ func _arrow_hit_block(aid: int, a: Dictionary, cell: Vector2i, pt: Vector2) -> v
 	match int(a.k):
 		1: g.fire_sys.ignite_area(cell, 1, true)
 		3: g.building.damage_block(cell, 4)
+	if int(a.k) == 0 and int(meta.src) != 0 and randf() < 0.5:
+		var av: Vector2 = a.v
+		g.spawn_drop(pt - av.normalized() * 6.0, "arrow", 1)
 	g.arrow_meta.erase(aid)
 	g.c_arrow_end.rpc(aid, pt, true)
 
@@ -252,13 +259,24 @@ func ability(id: int, idx: int, dir: Vector2) -> void:
 		"archer0":
 			g.c_knock.rpc(id, Vector2(-sgn * 220.0, -280.0))
 		"archer1":
-			for i in 5:
-				var d := Vector2.from_angle(dir.angle() + (i - 2) * 0.09)
-				spawn_arrow(_bow_origin(p, d), d * 520.0, 0, team, id, 10)
-			g.c_sfx.rpc("bow")
+			var na := InvS.take(s.inv, "arrow", 5)
+			if na == 0:
+				g.note_to(id, "No arrows for Volley")
+				ok = false
+			else:
+				for i in na:
+					var d := Vector2.from_angle(dir.angle() + (i - (na - 1) * 0.5) * 0.09)
+					spawn_arrow(_bow_origin(p, d), d * 520.0, 0, team, id, 10)
+				g.push_state(id)
+				g.c_sfx.rpc("bow")
 		"archer2":
-			spawn_arrow(_bow_origin(p, dir), dir * 620.0, 1, team, id, 18)
-			g.c_sfx.rpc("fire")
+			if InvS.take(s.inv, "arrow", 1) == 0:
+				g.note_to(id, "No arrows for Fire Arrow")
+				ok = false
+			else:
+				spawn_arrow(_bow_origin(p, dir), dir * 620.0, 1, team, id, 18)
+				g.push_state(id)
+				g.c_sfx.rpc("fire")
 		"engineer0":
 			ok = _bridge(id, s, p, int(sgn))
 		"engineer1":

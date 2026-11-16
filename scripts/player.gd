@@ -304,7 +304,7 @@ func _physics_process(dt: float) -> void:
 	if drawing or atk_t > 0.0:
 		face = 1 if cos(aim) >= 0.0 else -1
 	on_ladder = world.get_cell(cm) == world.LADDER
-	var jump: bool = Input.is_action_just_pressed("jump") and not game.ui_open
+	var jump: bool = Input.is_action_just_pressed("jump") and not bool(game.ui_open)
 	if on_ladder:
 		vel.y = Input.get_axis("up", "down") * 80.0
 		if jump:
@@ -417,6 +417,10 @@ func _actions(dt: float) -> void:
 				if rmb and drawing:
 					drawing = false
 					draw_k = 0.0
+				elif lmb and atk_cd <= 0.0 and not drawing and _arrows() <= 0:
+					if game.note_t <= 0.0:
+						game.note = "No arrows! Craft them (C) or pick them up"
+						game.note_t = 2.0
 				elif lmb and atk_cd <= 0.0:
 					drawing = true
 					draw_k = minf(1.0, draw_k + dt / float(td.draw))
@@ -448,6 +452,14 @@ func _actions(dt: float) -> void:
 	if position.distance_to(Vector2(cell) * T + Vector2(8, 8)) <= reach:
 		act_cd = 0.15
 		game.send_use(cell, inv_index())
+
+
+func _arrows() -> int:
+	var n := 0
+	for e in game.cl.get(id, {}).get("inv", []):
+		if e.get("i", "") == "arrow":
+			n += int(e.n)
+	return n
 
 
 func _swing(tool: String, td: Dictionary, adir: Vector2) -> void:

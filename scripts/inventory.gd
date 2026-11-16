@@ -14,7 +14,7 @@ static func empty() -> Array:
 
 
 static func max_stack(item: String) -> int:
-	return 99 if item in ["wood", "stone", "metal"] else 20
+	return 99 if item in ["wood", "stone", "metal", "arrow"] else 20
 
 
 static func count(inv: Array, item: String) -> int:

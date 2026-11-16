@@ -70,6 +70,10 @@ func _draw() -> void:
 		var n := 0
 		if is_tool:
 			it = p.tool_at(i) if p else ""
+			if it == "bow":
+				for e in inv:
+					if e.get("i", "") == "arrow":
+						n += int(e.n)
 		elif i - 3 < inv.size() and inv[i - 3].has("i"):
 			it = inv[i - 3]["i"]
 			n = inv[i - 3]["n"]
@@ -83,8 +87,8 @@ func _draw() -> void:
 			LookS.draw_icon(self, it, Rect2(r.position + Vector2(8, 8), Vector2(32, 32)), items)
 			if on:
 				sel_name = Net.TOOLS[it].label if is_tool else it.capitalize()
-		if n > 1:
-			_text(r.position + Vector2(0, S - 5), str(n), 13, Color.WHITE, HORIZONTAL_ALIGNMENT_RIGHT, S - 5)
+		if n > 1 or it == "bow":
+			_text(r.position + Vector2(0, S - 5), str(n), 13, Color(1, 0.4, 0.35) if n == 0 else Color.WHITE, HORIZONTAL_ALIGNMENT_RIGHT, S - 5)
 		_text(r.position + Vector2(5, 13), str((i + 1) % 10), 11, GOLD_HI if on else Color(0.75, 0.8, 0.9))
 	if sel_name != "":
 		_text(Vector2(x0, y0 - 30), sel_name, 14, GOLD_HI, HORIZONTAL_ALIGNMENT_CENTER, total)

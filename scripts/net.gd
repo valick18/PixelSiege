@@ -68,7 +68,7 @@ const TOOLS := {
 
 const KITS := {
 	"warrior": [["medkit", 1], ["food", 2]],
-	"archer": [["food", 2], ["torch", 2]],
+	"archer": [["arrow", 40], ["food", 2], ["torch", 2]],
 	"engineer": [["wood", 20], ["stone", 10], ["platform", 6], ["torch", 2]],
 	"support": [["medkit", 3], ["food", 3]],
 }
@@ -85,6 +85,7 @@ const RECIPES := {
 	"torch": {"cost": {"wood": 1, "stone": 1}, "n": 4, "station": "hand", "cat": "Light", "desc": "Small warm light"},
 	"campfire": {"cost": {"wood": 5, "stone": 2}, "n": 1, "station": "hand", "cat": "Light", "desc": "Big light, slowly heals allies standing nearby"},
 	"food": {"cost": {"wood": 1}, "n": 2, "station": "hand", "cat": "Consumables", "desc": "Restores 20 HP"},
+	"arrow": {"cost": {"wood": 1, "stone": 1}, "n": 10, "station": "hand", "cat": "Consumables", "desc": "Bow ammo. Arrows stuck in blocks can sometimes be picked up again"},
 	"lantern": {"cost": {"metal": 2, "wood": 1}, "n": 1, "station": "workbench", "cat": "Light", "desc": "Bright light that does not burn"},
 	"door": {"cost": {"wood": 6, "metal": 1}, "n": 1, "station": "workbench", "cat": "Building", "desc": "Team door: lets your team through, blocks enemies"},
 	"hatch": {"cost": {"wood": 4, "metal": 1}, "n": 1, "station": "workbench", "cat": "Defense", "desc": "Trapdoor: press E to open / close it under enemies"},

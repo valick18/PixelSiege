@@ -346,6 +346,16 @@ static func draw_icon(ci: CanvasItem, item: String, r: Rect2, items_tex: Texture
 		draw_tool_local(ci, item, 0.6 if item == "bow" else 0.0)
 		ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		return
+	if item == "arrow":
+		var sd := r.size.x / 16.0
+		var aa := r.position + Vector2(r.size.x * 0.2, r.size.y * 0.8)
+		var bb := r.position + Vector2(r.size.x * 0.8, r.size.y * 0.2)
+		var dv := (bb - aa).normalized()
+		ci.draw_line(aa, bb, WOOD.lightened(0.2), maxf(1.0, sd * 1.2))
+		ci.draw_colored_polygon(PackedVector2Array([bb + dv * 3.0 * sd, bb + dv.orthogonal() * 2.0 * sd, bb - dv.orthogonal() * 2.0 * sd]), STEEL)
+		ci.draw_line(aa, aa + (dv + dv.orthogonal()) * 3.0 * sd, STRING, 1.0)
+		ci.draw_line(aa, aa + (dv - dv.orthogonal()) * 3.0 * sd, STRING, 1.0)
+		return
 	var idx := ITEM_ORDER.find(item)
 	if items_tex and idx >= 0:
 		ci.draw_texture_rect_region(items_tex, r, Rect2(idx * 16, 0, 16, 16))
