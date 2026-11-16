@@ -1,0 +1,2 @@
+Put the Godot 4.3+ executable here (e.g. Godot_v4.3-stable_win64.exe).
+build_exe.bat and run_game.bat will find it automatically.

@@ -1,0 +1,1 @@
+Put your music files (.ogg / .mp3 / .wav) here. The first one found is looped automatically.
