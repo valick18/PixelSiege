@@ -19,3 +19,7 @@ _tools/*.zip
 .DS_Store
 Thumbs.db
 *.tmp
+*.bak
+
+__pycache__/
+*.pyc

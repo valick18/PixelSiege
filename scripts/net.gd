@@ -55,17 +55,39 @@ const TOOLS := {
 }
 
 const KITS := {
-	"warrior": [["medkit", 1], ["food", 2]],
-	"archer": [["arrow", ARROW_REFILL], ["food", 2], ["torch", 2]],
-	"engineer": [["wood", 20], ["stone", 10], ["platform", 6], ["wall", 10], ["torch", 2]],
+	"warrior": [["medkit", 1], ["food", 2], ["bomb", 2]],
+	"archer": [["arrow", ARROW_REFILL], ["food", 2], ["torch", 2], ["rope", 1]],
+	"engineer": [["wood", 20], ["stone", 10], ["platform", 6], ["wall", 10], ["torch", 2], ["shop_kit", 1]],
 }
 
 const TEAM_COLORS := [Color("2e86de"), Color("e74c3c")]
 const TEAM_NAMES := ["Blue", "Red"]
 const RESOURCES := ["wood", "stone", "metal"]
 const STATIONS := {"hand": "Hands", "workbench": "Workbench", "siege_workshop": "Siege workshop"}
-const CATEGORIES := ["All", "Building", "Defense", "Siege", "Light", "Consumables", "Stations"]
+# Магазини: ставить лише Builder (engineer) з shop_kit у будинок гравця; cost списується при встановленні
+const SHOPS := {
+	"builder": {"label": "Builder shop", "cost": {"wood": 12, "stone": 6}, "color": Color("f39c12")},
+	"warrior": {"label": "Warrior shop", "cost": {"wood": 8, "stone": 6, "metal": 4}, "color": Color("c0392b")},
+	"archer": {"label": "Archer shop", "cost": {"wood": 14, "metal": 3}, "color": Color("27ae60")},
+	"siege": {"label": "Siege workshop", "cost": {"wood": 16, "stone": 10, "metal": 8}, "color": Color("8d6e63")},
+}
+const CRAFT_TABS := {"basic": "Basic", "builder": "Builder shop", "warrior": "Warrior shop", "archer": "Archer shop", "siege": "Siege workshop"}
+const ARROWS := ["fire_arrow", "bomb_arrow", "poison_arrow"]
+const CATEGORIES := ["All", "Building", "Defense", "Siege", "Light", "Consumables", "Stations", "Builder Shop", "Warrior Shop", "Archer Shop", "Siege Workshop"]
 const RECIPES := {
+		"shop_kit": {"cost": {"wood": 10, "stone": 6, "metal": 2}, "n": 1, "station": "hand", "cat": "Stations", "cls": "engineer", "desc": "LMB inside a player-built house, then choose the shop"},
+		"bomb": {"cost": {"stone": 1, "metal": 1}, "n": 2, "station": "hand", "cat": "Warrior Shop", "shop": "warrior", "desc": "LMB throw, explodes 3x3"},
+		"rope": {"cost": {"wood": 3}, "n": 1, "station": "hand", "cat": "Archer Shop", "cls": "archer", "desc": "LMB throw, W pull up, S lower, Space let go"},
+		"fire_arrow": {"cost": {"wood": 2, "metal": 1}, "n": 5, "station": "hand", "cat": "Archer Shop", "shop": "archer", "desc": "Sets blocks and enemies on fire"},
+		"bomb_arrow": {"cost": {"wood": 2, "stone": 2, "metal": 2}, "n": 3, "station": "hand", "cat": "Archer Shop", "shop": "archer", "desc": "Explodes 3x3 on hit"},
+		"poison_arrow": {"cost": {"wood": 2, "stone": 1}, "n": 5, "station": "hand", "cat": "Archer Shop", "shop": "archer", "desc": "Poison: damage over 5 s"},
+		"rope_spare": {"item": "rope", "cost": {"wood": 2}, "n": 1, "station": "hand", "cat": "Archer Shop", "shop": "archer"},
+		"ladder_pack": {"item": "ladder", "cost": {"wood": 6}, "n": 8, "station": "hand", "cat": "Builder Shop", "shop": "builder"},
+		"torch_pack": {"item": "torch", "cost": {"wood": 2, "stone": 1}, "n": 10, "station": "hand", "cat": "Builder Shop", "shop": "builder"},
+		"medkit_pack": {"item": "medkit", "cost": {"wood": 3, "metal": 2}, "n": 3, "station": "hand", "cat": "Warrior Shop", "shop": "warrior"},
+		"tnt_crate": {"item": "tnt", "cost": {"stone": 5, "metal": 5}, "n": 3, "station": "hand", "cat": "Siege Workshop", "shop": "siege"},
+		"bomb_crate": {"item": "bomb", "cost": {"stone": 3, "metal": 3}, "n": 6, "station": "hand", "cat": "Siege Workshop", "shop": "siege"},
+		"firebomb_crate": {"item": "firebomb", "cost": {"wood": 5, "stone": 2}, "n": 3, "station": "hand", "cat": "Siege Workshop", "shop": "siege"},
 	"workbench": {"cost": {"wood": 10}, "n": 1, "station": "hand", "cat": "Stations", "desc": "Place it and press E to craft advanced items"},
 	"ladder": {"cost": {"wood": 2}, "n": 3, "station": "hand", "cat": "Building", "desc": "Climb with W/S"},
 	"wall": {"cost": {"stone": 1}, "n": 4, "station": "hand", "cat": "Building", "desc": "Back wall: blocks in front of a wall never collapse. Place it with LMB, break it with the pickaxe"},
@@ -88,8 +110,8 @@ const RECIPES := {
 	"catapult": {"cost": {"wood": 20, "stone": 10, "metal": 10}, "n": 1, "station": "siege_workshop", "cat": "Siege", "desc": "E to fire (1 stone ammo)"},
 	"ballista": {"cost": {"wood": 15, "metal": 8}, "n": 1, "station": "siege_workshop", "cat": "Siege", "desc": "Stationary heavy crossbow, E to fire (2 wood ammo)"},
 }
-const ITEM_BLOCK := {"wood": 3, "stone": 2, "metal": 4, "ladder": 9, "torch": 10, "spikes": 11, "tnt": 12, "spawn": 13, "catapult": 14, "storage": 15, "platform": 17, "door": 18, "workbench": 19, "siege_workshop": 20, "ballista": 21, "campfire": 22, "lantern": 23, "hatch": 24, "arrow_trap": 26}
-const STRUCT_ITEMS := ["spikes", "spawn", "catapult", "storage", "door", "workbench", "siege_workshop", "ballista", "hatch", "arrow_trap", "campfire", "lantern"]
+const ITEM_BLOCK := {"wood": 3, "stone": 2, "metal": 4, "ladder": 9, "torch": 10, "spikes": 11, "tnt": 12, "spawn": 13, "catapult": 14, "storage": 15, "platform": 17, "door": 18, "workbench": 19, "siege_workshop": 20, "ballista": 21, "campfire": 22, "lantern": 23, "hatch": 24, "arrow_trap": 26, "shop": 29}
+const STRUCT_ITEMS := ["spikes", "spawn", "catapult", "storage", "door", "workbench", "siege_workshop", "ballista", "hatch", "arrow_trap", "campfire", "lantern", "shop"]
 const RES_LIST := [Vector2i(1280, 720), Vector2i(1600, 900), Vector2i(1920, 1080)]
 const ACTION_KEYS := {"left": KEY_A, "right": KEY_D, "up": KEY_W, "down": KEY_S, "jump": KEY_SPACE, "crouch": KEY_CTRL, "run": KEY_SHIFT}
 
@@ -524,3 +546,6 @@ func set_players(plist: Dictionary) -> void:
 		for id in players:
 			memory[players[id].name] = {"team": players[id].team, "cls": players[id].cls}
 	players_changed.emit()
+
+
+# PixelSiege patch v1 (bombs, TNT, shops, crafting, rope)

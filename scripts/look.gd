@@ -334,6 +334,14 @@ static func draw_block_shape(ci: CanvasItem, b: int, r: Rect2, tcol: Color, tm: 
 			ci.draw_rect(_q(r, 1, 4, 14, 4), WOOD * md)
 			ci.draw_rect(_q(r, 1, 8, 14, 1), GOLD * md)
 			ci.draw_rect(_q(r, 7, 8, 2, 3), GOLD * md)
+		29:
+			var col: Color = Color("d4a017")
+			ci.draw_rect(_q(r, 1, 8, 14, 8), Color("6d4c41") * md)
+			ci.draw_rect(_q(r, 0, 2, 16, 4), col * md)
+			for i in 4:
+				ci.draw_rect(_q(r, i * 4, 2, 2, 4), col.lightened(0.4) * md)
+			ci.draw_rect(_q(r, 1, 6, 1, 2), Color("4e342e") * md)
+			ci.draw_rect(_q(r, 14, 6, 1, 2), Color("4e342e") * md)
 		_:
 			ci.draw_rect(r, Color.MAGENTA)
 
@@ -356,6 +364,35 @@ static func draw_icon(ci: CanvasItem, item: String, r: Rect2, items_tex: Texture
 		ci.draw_line(aa, aa + (dv + dv.orthogonal()) * 3.0 * sd, STRING, 1.0)
 		ci.draw_line(aa, aa + (dv - dv.orthogonal()) * 3.0 * sd, STRING, 1.0)
 		return
+	if item == "bomb":
+		var s := r.size.x / 16.0
+		var cp := r.get_center()
+		ci.draw_circle(cp, 5.0 * s, Color(0.18, 0.18, 0.22))
+		ci.draw_rect(Rect2(cp.x - 1.5 * s, cp.y - 7.5 * s, 3.0 * s, 3.0 * s), Color(0.55, 0.45, 0.3))
+		ci.draw_circle(cp + Vector2(0, -8.0 * s), 2.0 * s, Color(1.0, 0.8, 0.2))
+		return
+	if item == "rope":
+		var s := r.size.x / 16.0
+		var cp := r.get_center()
+		ci.draw_arc(cp, 5.0 * s, 0.0, TAU, 12, Color(0.76, 0.6, 0.38), 2.5 * s)
+		ci.draw_line(cp + Vector2(-3, 0) * s, cp + Vector2(5, 4) * s, Color(0.65, 0.5, 0.3), 2.0 * s)
+		return
+	if item == "shop_kit":
+		var s := r.size.x / 16.0
+		ci.draw_rect(Rect2(r.position.x + 2 * s, r.position.y + 6 * s, 12 * s, 8 * s), Color("6d4c41"))
+		ci.draw_rect(Rect2(r.position.x + 1 * s, r.position.y + 2 * s, 14 * s, 4 * s), Color("d4a017"))
+		return
+	if item in ["fire_arrow", "bomb_arrow", "poison_arrow"]:
+		var tip_col: Color = Color("ff5722") if item == "fire_arrow" else (Color("424242") if item == "bomb_arrow" else Color("7cb342"))
+		var sd := r.size.x / 16.0
+		var aa := r.position + Vector2(r.size.x * 0.2, r.size.y * 0.8)
+		var bb := r.position + Vector2(r.size.x * 0.8, r.size.y * 0.2)
+		var dv := (bb - aa).normalized()
+		ci.draw_line(aa, bb, WOOD.lightened(0.2), maxf(1.0, sd * 1.2))
+		ci.draw_colored_polygon(PackedVector2Array([bb + dv * 4.0 * sd, bb + dv.orthogonal() * 2.5 * sd, bb - dv.orthogonal() * 2.5 * sd]), tip_col)
+		ci.draw_line(aa, aa + (dv + dv.orthogonal()) * 3.0 * sd, STRING, 1.0)
+		ci.draw_line(aa, aa + (dv - dv.orthogonal()) * 3.0 * sd, STRING, 1.0)
+		return
 	var idx := ITEM_ORDER.find(item)
 	if items_tex and idx >= 0:
 		ci.draw_texture_rect_region(items_tex, r, Rect2(idx * 16, 0, 16, 16))
@@ -366,3 +403,6 @@ static func draw_icon(ci: CanvasItem, item: String, r: Rect2, items_tex: Texture
 		return
 	ci.draw_rect(r.grow(-r.size.x * 0.15), Color(0.6, 0.6, 0.65))
 	ci.draw_string(ThemeDB.fallback_font, r.position + Vector2(2, r.size.y * 0.65), item.substr(0, 2).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 4, int(r.size.y * 0.4))
+
+
+# PixelSiege patch v1 (bombs, TNT, shops, crafting, rope)

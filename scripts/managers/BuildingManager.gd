@@ -163,6 +163,12 @@ func use(id: int, cell: Vector2i, slot: int) -> void:
 	var item: String = s.inv[slot].get("i", "")
 	if item == "":
 		return
+	if item in Net.ARROWS:
+		s["arrow"] = item
+		g.note_to(id, "%s loaded: shoot with bow" % item.replace("_", " ").capitalize())
+		return
+	if item == "shop_kit" or item == "bomb" or item == "rope":
+		return
 	if item == "medkit" or item == "food":
 		if int(s.hp) >= 100:
 			hint(id, "Health is already full")
@@ -389,6 +395,14 @@ func craft(id: int, rname: String, times: int) -> void:
 	if not near_station(team, p.position, rec.station):
 		hint(id, "Needs a %s nearby" % Net.STATIONS[rec.station])
 		return
+	var need_cls: String = rec.get("cls", "")
+	if need_cls != "" and Net.players[id].cls != need_cls:
+		hint(id, "Only %s can craft this" % Net.CLASSES[need_cls].label)
+		return
+	var need_shop: String = rec.get("shop", "")
+	if need_shop != "" and not g._near_shop(p, team, need_shop):
+		hint(id, "Go to your team's %s (press E next to it)" % Net.SHOPS[need_shop].label)
+		return
 	var near := near_store(id, p)
 	var made := 0
 	for k in clampi(times, 1, 10):
@@ -413,14 +427,15 @@ func _craft_once(s, team: int, near: bool, rec: Dictionary, rname: String) -> St
 		if have < int(rec.cost[k]):
 			return "Not enough %s" % k
 	var test: Array = s.inv.duplicate(true)
-	if InvS.add(test, rname, int(rec.n)) > 0:
+	var out_item: String = rec.get("item", rname)
+	if InvS.add(test, out_item, int(rec.n)) > 0:
 		return "Inventory full"
 	for k in rec.cost:
 		var need: int = rec.cost[k]
 		need -= InvS.take(s.inv, k, need)
 		if need > 0:
 			g.store[team][k] = int(g.store[team][k]) - need
-	InvS.add(s.inv, rname, int(rec.n))
+	InvS.add(s.inv, out_item, int(rec.n))
 	return ""
 
 
@@ -512,3 +527,6 @@ func tick(dt: float) -> void:
 		regrow_ore.erase(c)
 		if w.get_cell(c) == w.AIR and not _player_near(_center(c), 48.0):
 			g.send_edits([[c, w.ORE, -1]])
+
+
+# PixelSiege patch v1 (bombs, TNT, shops, crafting, rope)

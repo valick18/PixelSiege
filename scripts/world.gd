@@ -33,18 +33,19 @@ const HATCH_OPEN := 25
 const ARROW_TRAP := 26
 const RUIN_BRICK := 27
 const RUIN_CHEST := 28
+const SHOP := 29
 const FLAMMABLE := [3, 6, 8, 9, 10, 12, 13, 14, 15, 17, 18, 19, 20, 21, 24, 25]
 const TREE_BLOCKS := [6, 8]
 const SOLID := [1, 2, 3, 4, 5, 7, 12, 24, 26, 27]
-const HP := {1: 2, 2: 4, 3: 2, 4: 8, 5: 4, 6: 2, 8: 1, 9: 1, 10: 1, 11: 3, 12: 3, 13: 10, 14: 20, 15: 15, 17: 1, 18: 6, 19: 6, 20: 12, 21: 14, 22: 3, 23: 3, 24: 5, 25: 5, 26: 8, 27: 6, 28: 2}
-const DROPS := {2: "stone", 3: "wood", 4: "metal", 5: "metal", 6: "wood", 9: "ladder", 10: "torch", 11: "spikes", 13: "spawn", 14: "catapult", 15: "storage", 17: "platform", 18: "door", 19: "workbench", 20: "siege_workshop", 21: "ballista", 22: "campfire", 23: "lantern", 24: "hatch", 25: "hatch", 26: "arrow_trap", 27: "stone"}
+const HP := {1: 2, 2: 4, 3: 2, 4: 8, 5: 4, 6: 2, 8: 1, 9: 1, 10: 1, 11: 3, 12: 3, 13: 10, 14: 20, 15: 15, 17: 1, 18: 6, 19: 6, 20: 12, 21: 14, 22: 3, 23: 3, 24: 5, 25: 5, 26: 8, 27: 6, 28: 2, 29: 25}
+const DROPS := {2: "stone", 3: "wood", 4: "metal", 5: "metal", 6: "wood", 9: "ladder", 10: "torch", 11: "spikes", 13: "spawn", 14: "catapult", 15: "storage", 17: "platform", 18: "door", 19: "workbench", 20: "siege_workshop", 21: "ballista", 22: "campfire", 23: "lantern", 24: "hatch", 25: "hatch", 26: "arrow_trap", 27: "stone", 29: "shop_kit"}
 const COLORS := {
 	1: Color("8e5a3a"), 2: Color("737d92"), 3: Color("b9854a"), 4: Color("aab7c4"), 5: Color("e6b800"),
 	6: Color("5d3a35"), 7: Color("2c3e50"), 8: Color("4a9a4a"), 9: Color("8d6e63"), 10: Color("ffb300"),
 	11: Color("90a4ae"), 12: Color("c0392b"), 13: Color("26c6da"), 14: Color("6d4c41"), 15: Color("8d6e43"),
 	16: Color("3a78d0"), 17: Color("a8713e"), 18: Color("a8713e"), 19: Color("a8713e"), 20: Color("6b4426"),
 	21: Color("6b4426"), 22: Color("ff8a3d"), 23: Color("ffd36b"), 24: Color("a8713e"), 25: Color("a8713e"),
-	26: Color("8a93a3"), 27: Color("9c8f7a"), 28: Color("e8b33a"),
+	26: Color("8a93a3"), 27: Color("9c8f7a"), 28: Color("e8b33a"), 29: Color("d4a017"),
 }
 # block -> [texture_scale, energy, color, offset]
 const LIGHTS := {10: [1.6, 1.4, Color(1.0, 0.78, 0.48), Vector2(8, 6)], 22: [2.6, 1.7, Color(1.0, 0.62, 0.3), Vector2(8, 10)], 23: [2.3, 1.5, Color(1.0, 0.93, 0.72), Vector2(8, 5)]}
@@ -60,6 +61,7 @@ var trees: Array = []  # [x, top_y, kind]
 var owner_team := {}
 var fire := {}
 var lights := {}
+var shop_info := {}  # cell -> [shop type, team], sets game.gd
 var _solid := PackedByteArray()
 var _ltex: Texture2D
 var atlas: Texture2D
@@ -510,6 +512,9 @@ func _draw() -> void:
 					if b == ORE and tex_ore:
 						draw_texture_rect_region(tex_ore, r, Rect2(((x * 7 + y * 3) % 3) * 16, 0, 16, 16), md)
 				continue
+			if b == SHOP:
+				_draw_shop(x, y, r)
+				continue
 			var ot = owner_team.get(Vector2i(x, y))
 			if b >= WATER:
 				var tc: Color = Net.TEAM_COLORS[ot] if ot != null else Color(0.6, 0.6, 0.6)
@@ -540,3 +545,18 @@ func _draw() -> void:
 				draw_texture_rect_region(fire_tex, Rect2(o, Vector2(T, T)), Rect2(((int(tm * 10.0) + cell.x) % 4) * 16, 0, 16, 16))
 			else:
 				draw_rect(Rect2(o, Vector2(T, T)), Color(1.0, 0.5, 0.1, 0.8))
+
+
+func _draw_shop(x: int, y: int, r: Rect2) -> void:
+	var info = shop_info.get(Vector2i(x, y))
+	var kind: String = info[0] if info != null else "builder"
+	var col: Color = Net.SHOPS.get(kind, {}).get("color", Color("d4a017"))
+	draw_rect(Rect2(r.position + Vector2(1, 8), Vector2(14, 8)), Color("6d4c41"))
+	draw_rect(Rect2(r.position + Vector2(0, 2), Vector2(16, 4)), col)
+	for i in 4:
+		draw_rect(Rect2(r.position + Vector2(i * 4, 2), Vector2(2, 4)), col.lightened(0.4))
+	draw_rect(Rect2(r.position + Vector2(1, 6), Vector2(1, 2)), Color("4e342e"))
+	draw_rect(Rect2(r.position + Vector2(14, 6), Vector2(1, 2)), Color("4e342e"))
+	draw_string(ThemeDB.fallback_font, r.position + Vector2(4, 15), kind.substr(0, 1).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color.WHITE)
+
+# PixelSiege patch v1 (bombs, TNT, shops, crafting, rope)

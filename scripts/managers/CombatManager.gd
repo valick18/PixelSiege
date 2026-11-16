@@ -71,6 +71,7 @@ func swing(id: int, dir: Vector2, tool: String) -> void:
 	var origin: Vector2 = p.position + Vector2(0, -2)
 	g.c_anim.rpc(id, 0)
 	g.c_fx.rpc(origin, origin + dir * rng, 0)
+	g._deflect_proj(id, origin, dir, rng)
 	var my := _team(id)
 	var hit := false
 	if g.prep_left <= 0.0:
@@ -124,7 +125,15 @@ func shoot(id: int, dir: Vector2, charge: float) -> void:
 	dir = dir.normalized()
 	var spd := lerpf(float(td.speed), float(td.speed_max), k)
 	var dmg := int(lerpf(float(td.dmg), float(td.dmg_max), k * k))
-	spawn_arrow(_bow_origin(p, dir), dir * spd, 0, _team(id), id, dmg)
+	var special: String = s.get("arrow", "")
+	var akind := 0
+	if special != "":
+		match special:
+			"fire_arrow": akind = 1
+			"bomb_arrow": akind = 4
+			"poison_arrow": akind = 5
+		s["arrow"] = ""
+	spawn_arrow(_bow_origin(p, dir), dir * spd, akind, _team(id), id, dmg)
 	g.c_anim.rpc(id, 0)
 
 
@@ -207,6 +216,13 @@ func _arrow_hit_player(aid: int, a: Dictionary, oid: int, pt: Vector2) -> void:
 	damage(oid, int(float(meta.dmg) * dmg_mult(src)), kb, src, true, false)
 	if int(a.k) == 1:
 		g.fire_sys.ignite_area(Vector2i(floori(pt.x / T), floori(pt.y / T)), 1, false)
+		if int(a.k) == 4:
+			g._explode_square(Vector2i(floori(pt.x / T), floori(pt.y / T)), 1, 8.0, src, false)
+		elif int(a.k) == 5:
+			if g.st.has(oid):
+				g.st[oid]["poison_until"] = g.now() + 5.0
+				g.st[oid]["poison_src"] = src
+				g.note_to(oid, "You are poisoned!")
 	g.arrow_meta.erase(aid)
 	g.c_arrow_end.rpc(aid, pt, false)
 
@@ -216,6 +232,7 @@ func _arrow_hit_block(aid: int, a: Dictionary, cell: Vector2i, pt: Vector2) -> v
 	match int(a.k):
 		1: g.fire_sys.ignite_area(cell, 1, true)
 		3: g.building.damage_block(cell, 4)
+		4: g._explode_square(cell, 1, 8.0, int(meta.src), false)
 	if int(a.k) == 0 and int(meta.src) != 0 and randf() < 0.5:
 		var av: Vector2 = a.v
 		g.spawn_drop(pt - av.normalized() * 6.0, "arrow", 1)
@@ -412,3 +429,6 @@ func tick(dt: float) -> void:
 				spawn_arrow(start, Vector2(sgn * 560.0, -15.0), 2, int(sc.team), 0, 12, 60.0)
 				sc.cd = now + 2.0
 				break
+
+
+# PixelSiege patch v1 (bombs, TNT, shops, crafting, rope)
