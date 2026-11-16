@@ -1,14 +1,20 @@
 extends Control
-# Піксельний HUD: панель рахунку, слоти інвентаря з іконками (масштаб x2, без розтягування), смуга здоров'я.
+# Піксельний HUD: 3 окремі слоти інструментів класу (1-3) + 7 слотів предметів (4-0), здібності Q/R/F з перезарядкою,
+# смуга здоров'я, активні бафи, панель рахунку.
 
+const LookS = preload("res://scripts/look.gd")
 var game
 const S := 48.0
 const GAP := 6.0
+const SEP := 16.0
 const EDGE := Color(0.02, 0.02, 0.05, 1.0)
 const RIM := Color(0.36, 0.41, 0.55)
 const RIM_HI := Color(0.55, 0.62, 0.74)
+const TOOL_RIM := Color(0.62, 0.45, 0.25)
+const TOOL_HI := Color(0.8, 0.62, 0.38)
 const GOLD := Color(0.996, 0.682, 0.204)
 const GOLD_HI := Color(0.996, 0.906, 0.38)
+const KEYS := ["Q", "R", "F"]
 
 
 func _process(_dt: float) -> void:
@@ -42,32 +48,69 @@ func _draw() -> void:
 	var d: Dictionary = game.cl.get(me, {})
 	var inv: Array = d.get("inv", [])
 	var hp: int = d.get("hp", 100)
-	var p = game.players_root.get_node_or_null(str(me))
+	var p = game.player_node(me)
 	var sel: int = p.selected if p else 0
 	var items = Net.tex("res://assets/items.png")
-	# ---- hotbar
-	var total := 10.0 * S + 9.0 * GAP
+	var now := Time.get_ticks_msec() / 1000.0
+	# ---- панель: інструменти | предмети
+	var total := 10.0 * S + 9.0 * GAP + SEP
 	var x0 := floorf((vs.x - total) * 0.5)
 	var y0 := vs.y - S - 16.0
-	_frame(Rect2(x0 - 10, y0 - 10, total + 20, S + 20), Color(0.05, 0.05, 0.1, 0.72), Color(0.2, 0.23, 0.33), Color(0.3, 0.34, 0.46))
+	_frame(Rect2(x0 - 10, y0 - 10, 3.0 * S + 2.0 * GAP + 20, S + 20), Color(0.12, 0.08, 0.05, 0.75), Color(0.35, 0.25, 0.15), Color(0.45, 0.33, 0.2))
+	_frame(Rect2(x0 + 3.0 * (S + GAP) + SEP - 10, y0 - 10, 7.0 * S + 6.0 * GAP + 20, S + 20), Color(0.05, 0.05, 0.1, 0.72), Color(0.2, 0.23, 0.33), Color(0.3, 0.34, 0.46))
+	_text(Vector2(x0 - 6, y0 - 14), "TOOLS", 10, TOOL_HI)
+	_text(Vector2(x0 + 3.0 * (S + GAP) + SEP - 6, y0 - 14), "ITEMS", 10, RIM_HI)
+	var sel_name := ""
 	for i in 10:
-		var r := Rect2(x0 + i * (S + GAP), y0, S, S)
+		var x := x0 + i * (S + GAP) + (SEP if i >= 3 else 0.0)
+		var r := Rect2(x, y0, S, S)
 		var on := i == sel
+		var is_tool := i < 3
+		var it := ""
+		var n := 0
+		if is_tool:
+			it = p.tool_at(i) if p else ""
+		elif i - 3 < inv.size() and inv[i - 3].has("i"):
+			it = inv[i - 3]["i"]
+			n = inv[i - 3]["n"]
 		if on:
 			_frame(r.grow(2), Color(0.22, 0.18, 0.2, 0.98), GOLD, GOLD_HI)
+		elif is_tool:
+			_frame(r, Color(0.2, 0.14, 0.1, 0.95) if it != "" else Color(0.1, 0.08, 0.07, 0.6), TOOL_RIM, TOOL_HI)
 		else:
 			_frame(r, Color(0.12, 0.13, 0.22, 0.95), RIM, RIM_HI)
-		if i < inv.size() and inv[i].has("i"):
-			var idx: int = game.ITEM_ORDER.find(inv[i]["i"])
-			if items and idx >= 0:
-				draw_texture_rect_region(items, Rect2(r.position + Vector2(8, 8), Vector2(32, 32)), Rect2(idx * 16, 0, 16, 16))
-			var n: int = inv[i]["n"]
-			if n > 1:
-				_text(r.position + Vector2(0, S - 5), str(n), 13, Color.WHITE, HORIZONTAL_ALIGNMENT_RIGHT, S - 5)
+		if it != "":
+			LookS.draw_icon(self, it, Rect2(r.position + Vector2(8, 8), Vector2(32, 32)), items)
+			if on:
+				sel_name = Net.TOOLS[it].label if is_tool else it.capitalize()
+		if n > 1:
+			_text(r.position + Vector2(0, S - 5), str(n), 13, Color.WHITE, HORIZONTAL_ALIGNMENT_RIGHT, S - 5)
 		_text(r.position + Vector2(5, 13), str((i + 1) % 10), 11, GOLD_HI if on else Color(0.75, 0.8, 0.9))
-	if sel < inv.size() and inv[sel].has("i"):
-		_text(Vector2(x0, y0 - 18), str(inv[sel]["i"]).capitalize(), 14, GOLD_HI, HORIZONTAL_ALIGNMENT_CENTER, total)
-	# ---- health
+	if sel_name != "":
+		_text(Vector2(x0, y0 - 30), sel_name, 14, GOLD_HI, HORIZONTAL_ALIGNMENT_CENTER, total)
+	# ---- здібності Q / R / F
+	if p:
+		var abl: Array = Net.CLASSES[p.cls]["abilities"]
+		var ax := x0 + total + 24.0
+		for i in 3:
+			var r := Rect2(ax + i * 50.0, y0 + 2, 44, 44)
+			var left: float = float(p.ab_until[i]) - now
+			var is_ready := left <= 0.0
+			_frame(r, Color(0.14, 0.1, 0.2, 0.95), GOLD if is_ready else RIM, GOLD_HI if is_ready else RIM_HI)
+			var nm: String = abl[i]["name"]
+			_text(r.position + Vector2(0, 26), nm.substr(0, 6), 10, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+			if not is_ready:
+				var k := clampf(left / float(abl[i]["cd"]), 0.0, 1.0)
+				draw_rect(Rect2(r.position + Vector2(2, 2), Vector2(r.size.x - 4, (r.size.y - 4) * k)), Color(0, 0, 0, 0.6))
+				_text(r.position + Vector2(0, 40), str(ceili(left)), 12, Color(1, 0.8, 0.5), HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+			_text(r.position + Vector2(4, 12), KEYS[i], 11, GOLD_HI)
+		# клас і бафи
+		var line: String = Net.CLASSES[p.cls]["label"]
+		for bn in p.buffs:
+			if float(p.buffs[bn]) > now:
+				line += "   [%s %ds]" % [String(bn).capitalize(), ceili(float(p.buffs[bn]) - now)]
+		_text(Vector2(14, vs.y - 52), line, 14, GOLD_HI)
+	# ---- здоров'я
 	var hb := Rect2(30, vs.y - 40, 230, 22)
 	_frame(hb, Color(0.12, 0.05, 0.08, 0.95), Color(0.45, 0.2, 0.25), Color(0.6, 0.3, 0.35))
 	var fw := (hb.size.x - 8) * clampf(hp / 100.0, 0.0, 1.0)
@@ -80,7 +123,7 @@ func _draw() -> void:
 	if heart:
 		draw_texture_rect(heart, Rect2(hb.position + Vector2(-18, -1), Vector2(24, 24)), false)
 	_text(hb.position + Vector2(0, 16), "%d / 100" % hp, 13, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, hb.size.x)
-	# ---- score panel
+	# ---- рахунок
 	var pw := 520.0
 	var top := Rect2(floorf((vs.x - pw) * 0.5), 8, pw, 72)
 	_frame(top, Color(0.06, 0.06, 0.12, 0.8), Color(0.25, 0.29, 0.42), Color(0.36, 0.41, 0.55))

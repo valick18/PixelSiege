@@ -1,39 +1,114 @@
 extends Node
-# Autoload "Net": мережа (ENet), LAN-пошук серверів, UPnP, налаштування, звуки, дані класів і рецептів.
+# Autoload "Net": мережа (ENet або Steam P2P), LAN-пошук, UPnP, налаштування, звуки,
+# дані класів, інструментів, рецептів і робочих станцій.
 
+const LookS = preload("res://scripts/look.gd")
 const PORT := 24565
 const DISCOVERY_PORT := 24566
 const MAX_PLAYERS := 20
 const REACH := 90.0
+const HOTBAR := 7        # слоти предметів на панелі (клавіші 4-0)
+const INV_SIZE := 21     # 7 на панелі + 14 у рюкзаку (Tab)
+const TOOL_SLOTS := 3    # окремі слоти інструментів (клавіші 1-3)
+
 const CLASSES := {
-	"warrior": {"label": "Warrior", "dmg": 25, "range": 36.0, "dig": 2, "cd": 0.45, "color": Color("b03a2e"), "ability": "Charge", "ab_cd": 8.0},
-	"archer": {"label": "Archer", "dmg": 12, "range": 220.0, "dig": 1, "cd": 0.7, "color": Color("1e8449"), "ability": "Backflip", "ab_cd": 8.0},
-	"engineer": {"label": "Engineer", "dmg": 10, "range": 32.0, "dig": 4, "cd": 0.5, "color": Color("ca6f1e"), "ability": "Bridge", "ab_cd": 10.0},
-	"support": {"label": "Support", "dmg": 8, "range": 32.0, "dig": 1, "cd": 0.5, "color": Color("7d3c98"), "ability": "Heal aura", "ab_cd": 15.0},
+	"warrior": {
+		"label": "Warrior", "color": Color("b03a2e"),
+		"role": "Front-line fighter. Sword combos, spear reach, breaks enemy lines.",
+		"tools": ["sword", "spear"],
+		"abilities": [
+			{"name": "Charge", "cd": 8.0, "desc": "Dash forward, hitting enemies on the way"},
+			{"name": "Whirlwind", "cd": 12.0, "desc": "Spin attack that hits everyone around you"},
+			{"name": "War Cry", "cd": 25.0, "desc": "+50% damage for you and nearby allies (6 s)"},
+		],
+	},
+	"archer": {
+		"label": "Archer", "color": Color("1e8449"),
+		"role": "Ranged damage. Hold LMB to draw the bow, release to shoot.",
+		"tools": ["bow", "dagger"],
+		"abilities": [
+			{"name": "Backflip", "cd": 8.0, "desc": "Leap back away from the enemy"},
+			{"name": "Volley", "cd": 12.0, "desc": "Shoot a fan of 5 arrows"},
+			{"name": "Fire Arrow", "cd": 18.0, "desc": "An arrow that sets wooden things on fire"},
+		],
+	},
+	"engineer": {
+		"label": "Builder", "color": Color("ca6f1e"),
+		"role": "The only class with a pickaxe and an axe: mines blocks, chops trees, builds the base.",
+		"tools": ["pickaxe", "axe", "hammer"],
+		"abilities": [
+			{"name": "Bridge", "cd": 10.0, "desc": "Build a 5-block wooden bridge (uses wood)"},
+			{"name": "Stone Wall", "cd": 14.0, "desc": "Raise a 3-block stone wall in front (uses stone)"},
+			{"name": "Repair", "cd": 20.0, "desc": "Fully repair blocks and structures nearby"},
+		],
+	},
+	"support": {
+		"label": "Support", "color": Color("7d3c98"),
+		"role": "Keeps the team alive: heals, speeds up and shields allies.",
+		"tools": ["mace"],
+		"abilities": [
+			{"name": "Heal Aura", "cd": 15.0, "desc": "Heal allies around you by 30"},
+			{"name": "Haste", "cd": 18.0, "desc": "+40% move speed for nearby allies (5 s)"},
+			{"name": "Barrier", "cd": 25.0, "desc": "Nearby allies take 60% less damage (5 s)"},
+		],
+	},
 }
+
+# kind: melee (ЛКМ - удар по дузі), dig (кирка: тільки блоки), chop (сокира: тільки дерева), bow (затиснути ЛКМ)
+const TOOLS := {
+	"sword": {"label": "Sword", "kind": "melee", "dmg": 22, "range": 40.0, "arc": 120.0, "cd": 0.42, "kb": 190.0},
+	"spear": {"label": "Spear", "kind": "melee", "dmg": 18, "range": 60.0, "arc": 45.0, "cd": 0.6, "kb": 240.0},
+	"dagger": {"label": "Dagger", "kind": "melee", "dmg": 11, "range": 30.0, "arc": 130.0, "cd": 0.28, "kb": 110.0},
+	"mace": {"label": "Mace", "kind": "melee", "dmg": 15, "range": 36.0, "arc": 110.0, "cd": 0.55, "kb": 230.0},
+	"hammer": {"label": "Hammer", "kind": "melee", "dmg": 12, "range": 34.0, "arc": 110.0, "cd": 0.5, "kb": 200.0},
+	"pickaxe": {"label": "Pickaxe", "kind": "dig", "dmg": 7, "range": 32.0, "arc": 100.0, "cd": 0.5, "kb": 100.0, "power": 2, "dig_cd": 0.22},
+	"axe": {"label": "Axe", "kind": "chop", "dmg": 10, "range": 34.0, "arc": 100.0, "cd": 0.55, "kb": 140.0, "power": 2, "dig_cd": 0.25},
+	"bow": {"label": "Bow", "kind": "bow", "dmg": 8, "dmg_max": 30, "speed": 260.0, "speed_max": 640.0, "draw": 0.75, "cd": 0.3},
+}
+
+const KITS := {
+	"warrior": [["medkit", 1], ["food", 2]],
+	"archer": [["food", 2], ["torch", 2]],
+	"engineer": [["wood", 20], ["stone", 10], ["platform", 6], ["torch", 2]],
+	"support": [["medkit", 3], ["food", 3]],
+}
+
 const TEAM_COLORS := [Color("2e86de"), Color("e74c3c")]
 const TEAM_NAMES := ["Blue", "Red"]
 const RESOURCES := ["wood", "stone", "metal"]
+const STATIONS := {"hand": "Hands", "workbench": "Workbench", "siege_workshop": "Siege workshop"}
+const CATEGORIES := ["All", "Building", "Defense", "Siege", "Light", "Consumables", "Stations"]
 const RECIPES := {
-	"ladder": {"cost": {"wood": 2}, "n": 2},
-	"torch": {"cost": {"wood": 1, "stone": 1}, "n": 4},
-	"spikes": {"cost": {"wood": 2, "metal": 1}, "n": 2},
-	"tnt": {"cost": {"stone": 2, "metal": 2}, "n": 1},
-	"firebomb": {"cost": {"wood": 2, "stone": 1}, "n": 1},
-	"spawn": {"cost": {"wood": 10, "stone": 5}, "n": 1},
-	"storage": {"cost": {"wood": 8, "stone": 2}, "n": 1},
-	"catapult": {"cost": {"wood": 20, "stone": 10, "metal": 10}, "n": 1},
-	"medkit": {"cost": {"wood": 2, "metal": 1}, "n": 1},
-	"food": {"cost": {"wood": 1}, "n": 2},
+	"workbench": {"cost": {"wood": 10}, "n": 1, "station": "hand", "cat": "Stations", "desc": "Place it and press E to craft advanced items"},
+	"ladder": {"cost": {"wood": 2}, "n": 3, "station": "hand", "cat": "Building", "desc": "Climb with W/S"},
+	"platform": {"cost": {"wood": 1}, "n": 3, "station": "hand", "cat": "Building", "desc": "One-way: jump up through it, S+Space to drop down"},
+	"torch": {"cost": {"wood": 1, "stone": 1}, "n": 4, "station": "hand", "cat": "Light", "desc": "Small warm light"},
+	"campfire": {"cost": {"wood": 5, "stone": 2}, "n": 1, "station": "hand", "cat": "Light", "desc": "Big light, slowly heals allies standing nearby"},
+	"food": {"cost": {"wood": 1}, "n": 2, "station": "hand", "cat": "Consumables", "desc": "Restores 20 HP"},
+	"lantern": {"cost": {"metal": 2, "wood": 1}, "n": 1, "station": "workbench", "cat": "Light", "desc": "Bright light that does not burn"},
+	"door": {"cost": {"wood": 6, "metal": 1}, "n": 1, "station": "workbench", "cat": "Building", "desc": "Team door: lets your team through, blocks enemies"},
+	"hatch": {"cost": {"wood": 4, "metal": 1}, "n": 1, "station": "workbench", "cat": "Defense", "desc": "Trapdoor: press E to open / close it under enemies"},
+	"spikes": {"cost": {"wood": 2, "metal": 1}, "n": 2, "station": "workbench", "cat": "Defense", "desc": "Hurts enemies that step on it"},
+	"arrow_trap": {"cost": {"stone": 6, "metal": 3, "wood": 2}, "n": 1, "station": "workbench", "cat": "Defense", "desc": "Wall trap: shoots arrows at enemies in line"},
+	"storage": {"cost": {"wood": 8, "stone": 2}, "n": 1, "station": "workbench", "cat": "Building", "desc": "Team storage chest (E deposit, G take)"},
+	"spawn": {"cost": {"wood": 10, "stone": 5}, "n": 1, "station": "workbench", "cat": "Building", "desc": "Forward respawn point"},
+	"medkit": {"cost": {"wood": 2, "metal": 1}, "n": 1, "station": "workbench", "cat": "Consumables", "desc": "Restores 40 HP"},
+	"firebomb": {"cost": {"wood": 2, "stone": 1}, "n": 1, "station": "workbench", "cat": "Siege", "desc": "Sets an area on fire"},
+	"tnt": {"cost": {"stone": 2, "metal": 2}, "n": 1, "station": "workbench", "cat": "Siege", "desc": "Explosive block, light it with the pickaxe or fire"},
+	"siege_workshop": {"cost": {"wood": 20, "stone": 10, "metal": 4}, "n": 1, "station": "workbench", "cat": "Stations", "desc": "Station for catapults and ballistas"},
+	"catapult": {"cost": {"wood": 20, "stone": 10, "metal": 10}, "n": 1, "station": "siege_workshop", "cat": "Siege", "desc": "E to fire (1 stone ammo)"},
+	"ballista": {"cost": {"wood": 15, "metal": 8}, "n": 1, "station": "siege_workshop", "cat": "Siege", "desc": "Stationary heavy crossbow, E to fire (2 wood ammo)"},
 }
-const ITEM_BLOCK := {"wood": 3, "stone": 2, "metal": 4, "ladder": 9, "torch": 10, "spikes": 11, "tnt": 12, "spawn": 13, "catapult": 14, "storage": 15}
+const ITEM_BLOCK := {"wood": 3, "stone": 2, "metal": 4, "ladder": 9, "torch": 10, "spikes": 11, "tnt": 12, "spawn": 13, "catapult": 14, "storage": 15, "platform": 17, "door": 18, "workbench": 19, "siege_workshop": 20, "ballista": 21, "campfire": 22, "lantern": 23, "hatch": 24, "arrow_trap": 26}
+const STRUCT_ITEMS := ["spikes", "spawn", "catapult", "storage", "door", "workbench", "siege_workshop", "ballista", "hatch", "arrow_trap", "campfire", "lantern"]
 const RES_LIST := [Vector2i(1280, 720), Vector2i(1600, 900), Vector2i(1920, 1080)]
 const ACTION_KEYS := {"left": KEY_A, "right": KEY_D, "up": KEY_W, "down": KEY_S, "jump": KEY_SPACE, "crouch": KEY_CTRL, "run": KEY_SHIFT}
 
 signal players_changed
 signal connect_failed
+signal host_ready
 
-var players := {}  # peer_id -> {name, team, cls}
+var players := {}  # peer_id -> {name, team, cls, look}
 var memory := {}   # name -> {team, cls}  (повернення після розриву)
 var my_name := "Player"
 var join_password := ""
@@ -44,7 +119,11 @@ var world_seed := 0
 var map_size := 0  # 0 = small, 1 = medium
 var last_msg := ""
 var external_ip := ""
-var settings := {"music": 0.7, "sfx": 0.8, "fullscreen": false, "res": 0, "keys": {}}
+var settings := {"music": 0.7, "sfx": 0.8, "fullscreen": false, "res": 0, "keys": {}, "look": {}}
+# Steam P2P (необов'язково): працює лише якщо в проєкт додано GodotSteam (singleton "Steam" + SteamMultiplayerPeer)
+var steam_on := false
+var steam_lobby := 0
+var _steam_hosting := false
 
 var found := {}  # ip -> {info, t}
 var _bc: PacketPeerUDP
@@ -63,6 +142,7 @@ func _ready() -> void:
 	_setup_input()
 	_setup_audio()
 	apply_settings()
+	_steam_init()
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	multiplayer.connected_to_server.connect(_on_connected)
 	multiplayer.connection_failed.connect(_on_connection_failed)
@@ -75,6 +155,14 @@ func _exit_tree() -> void:
 		_upnp_thread.wait_to_finish()
 
 
+func my_look() -> Dictionary:
+	return LookS.sanitize(settings.get("look", {}))
+
+
+func tools_of(cname: String) -> Array:
+	return CLASSES.get(cname, CLASSES.warrior)["tools"]
+
+
 # ------------------------------------------------------------ settings / input / audio
 func load_settings() -> void:
 	var cf := ConfigFile.new()
@@ -85,6 +173,8 @@ func load_settings() -> void:
 	settings.fullscreen = cf.get_value("v", "fullscreen", false)
 	settings.res = cf.get_value("v", "res", 0)
 	settings.keys = cf.get_value("k", "keys", {})
+	settings.look = cf.get_value("p", "look", {})
+	my_name = cf.get_value("p", "name", my_name)
 
 
 func save_settings() -> void:
@@ -94,6 +184,8 @@ func save_settings() -> void:
 	cf.set_value("v", "fullscreen", settings.fullscreen)
 	cf.set_value("v", "res", settings.res)
 	cf.set_value("k", "keys", settings.keys)
+	cf.set_value("p", "look", settings.look)
+	cf.set_value("p", "name", my_name)
 	cf.save("user://settings.cfg")
 
 
@@ -149,8 +241,11 @@ func _setup_audio() -> void:
 		"pickup": _make_wav(700, 0.1, 0.0, 25), "hurt": _make_wav(150, 0.2, 0.5, 12),
 		"craft": _make_wav(500, 0.15, 0.1, 15), "flag": _make_wav(440, 0.3, 0.0, 6),
 		"thunder": _make_wav(45, 0.9, 0.8, 3), "fire": _make_wav(90, 0.15, 0.9, 20),
+		"swing": _make_wav(260, 0.09, 0.85, 30), "bow": _make_wav(520, 0.12, 0.3, 30),
+		"chop": _make_wav(200, 0.1, 0.5, 35), "death": _make_wav(110, 0.5, 0.4, 6),
+		"splash": _make_wav(80, 0.25, 0.95, 12),
 	}
-	for i in 8:
+	for i in 10:
 		var p := AudioStreamPlayer.new()
 		p.bus = "SFX"
 		add_child(p)
@@ -184,6 +279,7 @@ func play(n: String) -> void:
 	var p: AudioStreamPlayer = _pool[_pool_i]
 	_pool_i = (_pool_i + 1) % _pool.size()
 	p.stream = _sfx[n]
+	p.pitch_scale = randf_range(0.92, 1.08)
 	p.play()
 
 
@@ -204,6 +300,8 @@ func stop_listen() -> void:
 
 
 func _process(dt: float) -> void:
+	if steam_on:
+		Engine.get_singleton("Steam").call("run_callbacks")
 	if _bc and multiplayer.has_multiplayer_peer() and multiplayer.is_server():
 		_bc_t += dt
 		if _bc_t >= 1.0:
@@ -231,6 +329,70 @@ func _upnp_setup() -> void:
 			external_ip = u.query_external_address()
 
 
+# ------------------------------------------------------------ Steam P2P (NAT traversal через Steam relay)
+func steam_available() -> bool:
+	return Engine.has_singleton("Steam") and ClassDB.class_exists("SteamMultiplayerPeer")
+
+
+func _steam_init() -> void:
+	if not steam_available():
+		return
+	var steam = Engine.get_singleton("Steam")
+	var res = steam.call("steamInitEx")
+	steam_on = true
+	if res is Dictionary and int(res.get("status", 0)) != 0:
+		steam_on = false
+		return
+	steam.connect("lobby_created", _on_steam_lobby_created)
+	steam.connect("lobby_joined", _on_steam_lobby_joined)
+
+
+func host_steam(maxp: int, seed_text: String) -> int:
+	if not steam_on:
+		return ERR_UNAVAILABLE
+	_close_peer()
+	_prepare_host(maxp, seed_text)
+	_steam_hosting = true
+	Engine.get_singleton("Steam").call("createLobby", 2, max_players)  # 2 = public lobby
+	return OK
+
+
+func join_steam(lobby_id: int) -> int:
+	if not steam_on:
+		return ERR_UNAVAILABLE
+	_close_peer()
+	_steam_hosting = false
+	Engine.get_singleton("Steam").call("joinLobby", lobby_id)
+	return OK
+
+
+func _on_steam_lobby_created(result: int, lobby_id: int) -> void:
+	if result != 1:
+		last_msg = "Steam lobby could not be created"
+		connect_failed.emit()
+		return
+	steam_lobby = lobby_id
+	var peer = ClassDB.instantiate("SteamMultiplayerPeer")
+	peer.call("create_host", 0)
+	multiplayer.multiplayer_peer = peer
+	last_msg = "Steam lobby: %d" % lobby_id
+	host_ready.emit()
+
+
+func _on_steam_lobby_joined(lobby_id: int, _perm: int, _locked: bool, response: int) -> void:
+	if _steam_hosting:
+		return
+	if response != 1:
+		last_msg = "Cannot join Steam lobby"
+		connect_failed.emit()
+		return
+	steam_lobby = lobby_id
+	var owner_id = Engine.get_singleton("Steam").call("getLobbyOwner", lobby_id)
+	var peer = ClassDB.instantiate("SteamMultiplayerPeer")
+	peer.call("create_client", owner_id, 0)
+	multiplayer.multiplayer_peer = peer
+
+
 # ------------------------------------------------------------ host / join
 func _close_peer() -> void:
 	if multiplayer.multiplayer_peer:
@@ -238,14 +400,8 @@ func _close_peer() -> void:
 	multiplayer.multiplayer_peer = null
 
 
-func host_game(maxp: int, seed_text: String) -> int:
-	_close_peer()
-	var peer := ENetMultiplayerPeer.new()
+func _prepare_host(maxp: int, seed_text: String) -> void:
 	max_players = clampi(maxp, 2, MAX_PLAYERS)
-	var err := peer.create_server(PORT, max_players - 1)
-	if err != OK:
-		return err
-	multiplayer.multiplayer_peer = peer
 	var t := seed_text.strip_edges()
 	if t == "":
 		world_seed = randi()
@@ -253,8 +409,18 @@ func host_game(maxp: int, seed_text: String) -> int:
 		world_seed = int(t)
 	else:
 		world_seed = t.hash()
-	players = {1: {"name": my_name, "team": 0, "cls": "warrior"}}
+	players = {1: {"name": my_name, "team": 0, "cls": "warrior", "look": my_look()}}
 	memory = {my_name: {"team": 0, "cls": "warrior"}}
+
+
+func host_game(maxp: int, seed_text: String) -> int:
+	_close_peer()
+	var peer := ENetMultiplayerPeer.new()
+	var err := peer.create_server(PORT, clampi(maxp, 2, MAX_PLAYERS) - 1)
+	if err != OK:
+		return err
+	multiplayer.multiplayer_peer = peer
+	_prepare_host(maxp, seed_text)
 	_bc = PacketPeerUDP.new()
 	_bc.set_broadcast_enabled(true)
 	_bc.set_dest_address("255.255.255.255", DISCOVERY_PORT)
@@ -264,6 +430,9 @@ func host_game(maxp: int, seed_text: String) -> int:
 
 
 func join_game(ip: String) -> int:
+	ip = ip.strip_edges()
+	if ip.begins_with("steam:"):
+		return join_steam(int(ip.substr(6)))
 	_close_peer()
 	var peer := ENetMultiplayerPeer.new()
 	var err := peer.create_client(ip if ip != "" else "127.0.0.1", PORT)
@@ -278,13 +447,16 @@ func leave(msg: String = "") -> void:
 	if _bc:
 		_bc.close()
 		_bc = null
+	if steam_on and steam_lobby != 0:
+		Engine.get_singleton("Steam").call("leaveLobby", steam_lobby)
+		steam_lobby = 0
 	_close_peer()
 	players.clear()
 	get_tree().change_scene_to_file("res://scenes/menu.tscn")
 
 
 func _on_connected() -> void:
-	reg.rpc_id(1, my_name, join_password)
+	reg.rpc_id(1, my_name, join_password, my_look())
 
 
 func _on_connection_failed() -> void:
@@ -303,8 +475,16 @@ func _on_peer_disconnected(id: int) -> void:
 		set_players.rpc(players)
 
 
+func team_counts(exclude: int = 0) -> Array:
+	var c := [0, 0]
+	for pid in players:
+		if pid != exclude:
+			c[int(players[pid].team)] += 1
+	return c
+
+
 @rpc("any_peer", "reliable")
-func reg(pname: String, pw: String) -> void:
+func reg(pname: String, pw: String, look: Dictionary = {}) -> void:
 	if not multiplayer.is_server():
 		return
 	var id := multiplayer.get_remote_sender_id()
@@ -321,16 +501,10 @@ func reg(pname: String, pw: String) -> void:
 		team = memory[pname].team
 		cls = memory[pname].cls
 	else:
-		var c0 := 0
-		var c1 := 0
-		for pid in players:
-			if players[pid].team == 0:
-				c0 += 1
-			else:
-				c1 += 1
-		team = 0 if c0 <= c1 else 1
+		var c := team_counts()
+		team = 0 if c[0] <= c[1] else 1
 		memory[pname] = {"team": team, "cls": cls}
-	players[id] = {"name": pname, "team": team, "cls": cls}
+	players[id] = {"name": pname, "team": team, "cls": cls, "look": LookS.sanitize(look)}
 	join_ok.rpc_id(id, world_seed, map_size, players)
 	set_players.rpc(players)
 
