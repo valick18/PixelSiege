@@ -1,12 +1,11 @@
 extends PanelContainer
-# Вибір класу (після вибору команди або B): 4 графічні картки з анімованим персонажем у вашому вигляді,
-# роллю, інструментами та всіма трьома здібностями.
+# Вибір класу (після вибору команди або B): 3 графічні картки (Warrior, Archer, Builder) з анімованим персонажем
+# у вашому вигляді, роллю, інструментами та здібністю класу (у Builder здібностей немає).
 
 signal chosen(cls: String)
 const LookS = preload("res://scripts/look.gd")
 const CraftS = preload("res://scripts/ui/craft_ui.gd")
-const ORDER := ["warrior", "archer", "engineer", "support"]
-const KEYS := ["Q", "R", "F"]
+const ORDER := ["warrior", "archer", "engineer"]
 var game
 var previews: Array = []
 var cards: Array = []
@@ -62,10 +61,17 @@ func _ready() -> void:
 		tools.add_theme_color_override("font_color", Color(0.8, 0.62, 0.38))
 		tools.add_theme_font_size_override("font_size", 12)
 		vb.add_child(tools)
-		for i in 3:
-			var ab: Dictionary = cd.abilities[i]
+		var abl: Array = cd.abilities
+		if abl.is_empty():
+			var none := Label.new()
+			none.text = "Ability: none"
+			none.custom_minimum_size = Vector2(200, 0)
+			none.add_theme_font_size_override("font_size", 11)
+			vb.add_child(none)
+		for ab in abl:
 			var al := Label.new()
-			al.text = "%s  %s (%ds): %s" % [KEYS[i], ab.name, int(ab.cd), ab.desc]
+			var key: String = "Hold LMB %.1fs" % float(ab.get("hold_time", 2.5)) if bool(ab.get("hold", false)) else String(ab.get("key", "Q"))
+			al.text = "%s  %s (%ds): %s" % [key, ab.name, int(ab.cd), ab.desc]
 			al.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			al.custom_minimum_size = Vector2(200, 0)
 			al.add_theme_font_size_override("font_size", 11)

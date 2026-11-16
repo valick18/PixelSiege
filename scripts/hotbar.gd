@@ -1,6 +1,6 @@
 extends Control
-# Піксельний HUD: 3 окремі слоти інструментів класу (1-3) + 7 слотів предметів (4-0), здібності Q/R/F з перезарядкою,
-# смуга здоров'я, активні бафи, панель рахунку.
+# Піксельний HUD: 3 окремі слоти інструментів класу (1-3) + 7 слотів предметів (4-0), здібність класу з перезарядкою
+# (Warrior - Q, Archer - утримання ЛКМ, Builder - немає), смуга здоров'я, активні бафи, панель рахунку.
 
 const LookS = preload("res://scripts/look.gd")
 var game
@@ -14,7 +14,6 @@ const TOOL_RIM := Color(0.62, 0.45, 0.25)
 const TOOL_HI := Color(0.8, 0.62, 0.38)
 const GOLD := Color(0.996, 0.682, 0.204)
 const GOLD_HI := Color(0.996, 0.906, 0.38)
-const KEYS := ["Q", "R", "F"]
 
 
 func _process(_dt: float) -> void:
@@ -92,24 +91,24 @@ func _draw() -> void:
 		_text(r.position + Vector2(5, 13), str((i + 1) % 10), 11, GOLD_HI if on else Color(0.75, 0.8, 0.9))
 	if sel_name != "":
 		_text(Vector2(x0, y0 - 30), sel_name, 14, GOLD_HI, HORIZONTAL_ALIGNMENT_CENTER, total)
-	# ---- здібності Q / R / F
+	# ---- здібність класу (не більше однієї)
 	if p:
-		var abl: Array = Net.CLASSES[p.cls]["abilities"]
+		var abl: Array = Net.abilities_of(p.cls)
 		var ax := x0 + total + 24.0
-		for i in 3:
+		for i in abl.size():
 			var r := Rect2(ax + i * 50.0, y0 + 2, 44, 44)
 			var left: float = float(p.ab_until[i]) - now
 			var is_ready := left <= 0.0
 			_frame(r, Color(0.14, 0.1, 0.2, 0.95), GOLD if is_ready else RIM, GOLD_HI if is_ready else RIM_HI)
-			var nm: String = abl[i]["name"]
-			_text(r.position + Vector2(0, 26), nm.substr(0, 6), 10, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+			var nm: String = String(abl[i].get("short", abl[i]["name"]))
+			_text(r.position + Vector2(0, 26), nm.substr(0, 7), 10, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 			if not is_ready:
 				var k := clampf(left / float(abl[i]["cd"]), 0.0, 1.0)
 				draw_rect(Rect2(r.position + Vector2(2, 2), Vector2(r.size.x - 4, (r.size.y - 4) * k)), Color(0, 0, 0, 0.6))
 				_text(r.position + Vector2(0, 40), str(ceili(left)), 12, Color(1, 0.8, 0.5), HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
-			_text(r.position + Vector2(4, 12), KEYS[i], 11, GOLD_HI)
+			_text(r.position + Vector2(4, 12), String(abl[i].get("key", "Q")), 11, GOLD_HI)
 		# клас і бафи
-		var line: String = Net.CLASSES[p.cls]["label"]
+		var line: String = Net.CLASSES[p.cls]["label"] if Net.CLASSES.has(p.cls) else String(p.cls).capitalize()
 		for bn in p.buffs:
 			if float(p.buffs[bn]) > now:
 				line += "   [%s %ds]" % [String(bn).capitalize(), ceili(float(p.buffs[bn]) - now)]
@@ -156,4 +155,7 @@ func _draw() -> void:
 	_text(Vector2(top.position.x + 14, 58), "First to %d" % game.WIN_SCORE, 12, Color(0.75, 0.8, 0.9))
 	var tod: String = ["Day", "Sunset", "Night", "Dawn"][floori(fmod(game.match_time, 480.0) / 120.0)]
 	_text(Vector2(top.position.x, 36), tod, 15, Color.WHITE, HORIZONTAL_ALIGNMENT_RIGHT, pw - 14)
-	_text(Vector2(top.position.x, 58), str(game.weather).capitalize(), 12, Color(0.75, 0.8, 0.9), HORIZONTAL_ALIGNMENT_RIGHT, pw - 14)
+	var wind_txt := "Calm"
+	if absf(game.wind) > 0.2:
+		wind_txt = "Wind %s" % ("->" if game.wind > 0.0 else "<-")
+	_text(Vector2(top.position.x, 58), wind_txt, 12, Color(0.75, 0.8, 0.9), HORIZONTAL_ALIGNMENT_RIGHT, pw - 14)

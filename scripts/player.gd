@@ -1,6 +1,11 @@
 extends Node2D
 # Гравець: власна AABB-фізика по тайлах (вода, односторонні платформи, командні двері), бій (удар по дузі,
 # лук з натягом і прев'ю траєкторії), окремі слоти інструментів класу, анімація смерті.
+# Здібності: по одній на клас, обидві на утриманні ЛКМ.
+#   Warrior - Power Strike: затисніть ЛКМ зі зброєю на 1.5 с -> сильний удар. Звичайний удар - коли відпускаєте ЛКМ.
+#   Archer  - Multi-shot: затисніть ЛКМ з луком на 2.5 с -> віяло з 5 стріл.
+#   Builder - без здібностей.
+# Світла навколо гравця більше немає (лише факели, ліхтарі, багаття).
 # Власник (authority) керує своїм персонажем миттєво (локальне передбачення), інші гравці відтворюються
 # через буфер знімків (net_interp.gd), позиція відправляється 20 разів на секунду.
 
@@ -24,6 +29,9 @@ var selected := 0  # 0..2 - інструменти класу, 3..9 - предм
 var aim := 0.0
 var drawing := false
 var draw_k := 0.0
+var hold_t := 0.0          # скільки часу затиснута ЛКМ (для Multi-shot / Power Strike)
+var charging := false      # воїн тримає ЛКМ (удар буде при відпусканні)
+var wait_release := false  # після залпу чекаємо, поки гравець відпустить ЛКМ
 var act_cd := 0.0
 var atk_cd := 0.0
 var ab_until := [0.0, 0.0, 0.0]
@@ -49,7 +57,6 @@ var net_flags := 2
 var net_sel := 0
 var net_draw := 0.0
 var interp
-var lt: PointLight2D
 var game
 var world
 
@@ -66,11 +73,6 @@ func setup(pid: int, t: int, c: String, g, w) -> void:
 
 func _ready() -> void:
 	interp = InterpS.new()
-	lt = PointLight2D.new()
-	lt.texture = world.light_texture()
-	lt.texture_scale = 1.2 if is_multiplayer_authority() else 0.7
-	lt.energy = 0.8 if is_multiplayer_authority() else 0.4
-	add_child(lt)
 	if is_multiplayer_authority():
 		var cam := Camera2D.new()
 		cam.zoom = Vector2(2, 2)
@@ -117,11 +119,17 @@ func add_buff(n: String, dur: float) -> void:
 	buffs[n] = _now() + dur
 
 
+func _reset_draw() -> void:
+	drawing = false
+	draw_k = 0.0
+	hold_t = 0.0
+	charging = false
+
+
 func set_dead(d: bool) -> void:
 	if d and not dead:
 		death_t = 0.0
-		drawing = false
-		draw_k = 0.0
+		_reset_draw()
 		buffs.clear()
 	dead = d
 	if not d:
@@ -147,8 +155,7 @@ func _select(i: int) -> void:
 	if i < Net.TOOL_SLOTS and tool_at(i) == "":
 		return
 	selected = i
-	drawing = false
-	draw_k = 0.0
+	_reset_draw()
 
 
 func _cycle(d: int) -> void:
@@ -156,8 +163,7 @@ func _cycle(d: int) -> void:
 		selected = (selected + d + 10) % 10
 		if selected >= Net.TOOL_SLOTS or tool_at(selected) != "":
 			break
-	drawing = false
-	draw_k = 0.0
+	_reset_draw()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -174,7 +180,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F1: game.send_class("warrior")
 			KEY_F2: game.send_class("archer")
 			KEY_F3: game.send_class("engineer")
-			KEY_F4: game.send_class("support")
 		if dead:
 			return
 		if k >= KEY_1 and k <= KEY_9:
@@ -183,8 +188,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			_select(9)
 		match k:
 			KEY_Q: _use_ability(0)
-			KEY_R: _use_ability(1)
-			KEY_F: _use_ability(2)
 			KEY_E: game.interact_local(Vector2.from_angle(aim))
 			KEY_G: game.send_store(false)
 			KEY_Z:
@@ -194,12 +197,43 @@ func _unhandled_input(event: InputEvent) -> void:
 					game.send_dodge(face)
 
 
+# Здібність на клавішу Q (лише якщо вона є у класу і не активується утриманням ЛКМ).
 func _use_ability(idx: int) -> void:
+	var abl: Array = Net.abilities_of(cls)
+	if idx < 0 or idx >= abl.size() or bool(abl[idx].get("hold", false)):
+		return
 	var now := _now()
 	if now < float(ab_until[idx]):
 		return
-	ab_until[idx] = now + float(Net.CLASSES[cls]["abilities"][idx]["cd"])
+	ab_until[idx] = now + float(abl[idx]["cd"])
 	game.send_ability(idx, Vector2.from_angle(aim))
+
+
+# Здібність на утриманні ЛКМ готова: є у класу, перезарядка минула (для лучника ще й є стріли).
+func hold_ready() -> bool:
+	var abl: Array = Net.abilities_of(cls)
+	if abl.is_empty() or not bool(abl[0].get("hold", false)) or _now() < float(ab_until[0]):
+		return false
+	if "bow" in Net.tools_of(cls):
+		return _arrows() > 0
+	return true
+
+
+func _hold_time() -> float:
+	var abl: Array = Net.abilities_of(cls)
+	return float(abl[0].get("hold_time", Net.VOLLEY_HOLD)) if abl.size() > 0 else Net.VOLLEY_HOLD
+
+
+# Клас має сильний удар на утриманні ЛКМ зі зброєю ближнього бою (Warrior).
+func _melee_hold() -> bool:
+	var abl: Array = Net.abilities_of(cls)
+	return abl.size() > 0 and bool(abl[0].get("hold", false)) and not "bow" in Net.tools_of(cls)
+
+
+func _fire_volley(adir: Vector2) -> void:
+	var abl: Array = Net.abilities_of(cls)
+	ab_until[0] = _now() + float(abl[0]["cd"])
+	game.send_ability(0, adir)
 
 
 func anim(kind: int) -> void:
@@ -244,8 +278,6 @@ func _physics_process(dt: float) -> void:
 	v_est = v_est.lerp((position - _prev) / maxf(dt, 0.0001), 0.4)
 	_prev = position
 	anim_t += dt
-	var ug := 1.0 if floori(position.y / T) > world.surf[clampi(floori(position.x / T), 0, world.w - 1)] + 3 else 0.0
-	lt.energy = clampf(maxf((0.75 - game.daylight) * 1.6, ug), 0.0, 1.0) * (0.9 if is_multiplayer_authority() else 0.45)
 	hurt_t = maxf(0.0, hurt_t - dt)
 	atk_t = maxf(0.0, atk_t - dt)
 	dig_t = maxf(0.0, dig_t - dt)
@@ -289,8 +321,6 @@ func _physics_process(dt: float) -> void:
 		spd *= 0.55
 	if blocking:
 		spd *= 0.6
-	if has_buff("haste"):
-		spd *= 1.4
 	var cm := Vector2i(floori(position.x / T), floori(position.y / T))
 	var was_water := in_water
 	in_water = world.is_water(cm.x, cm.y) or world.is_water(cm.x, floori((position.y + HALF.y - 2.0) / T))
@@ -401,8 +431,7 @@ func _in_reach(cell: Vector2i) -> bool:
 
 func _actions(dt: float) -> void:
 	if game.ui_open:
-		drawing = false
-		draw_k = 0.0
+		_reset_draw()
 		return
 	var mp := get_global_mouse_position()
 	var cell := Vector2i(floori(mp.x / T), floori(mp.y / T))
@@ -414,9 +443,11 @@ func _actions(dt: float) -> void:
 		var td: Dictionary = Net.TOOLS[tool]
 		match String(td.kind):
 			"bow":
-				if rmb and drawing:
-					drawing = false
-					draw_k = 0.0
+				if wait_release:
+					if not lmb:
+						wait_release = false
+				elif rmb and drawing:
+					_reset_draw()
 				elif lmb and atk_cd <= 0.0 and not drawing and _arrows() <= 0:
 					if game.note_t <= 0.0:
 						game.note = "No arrows! Craft them (C) or pick them up"
@@ -424,14 +455,46 @@ func _actions(dt: float) -> void:
 				elif lmb and atk_cd <= 0.0:
 					drawing = true
 					draw_k = minf(1.0, draw_k + dt / float(td.draw))
+					hold_t += dt
+					# Multi-shot: ЛКМ утримується 2.5 с -> віяло стріл
+					if hold_t >= _hold_time() and hold_ready():
+						_fire_volley(adir)
+						atk_cd = float(td.cd) + 0.3
+						_reset_draw()
+						wait_release = true
+						Net.play("bow")
 				elif drawing and not lmb:
 					game.send_shoot(adir, draw_k)
 					atk_cd = float(td.cd)
-					drawing = false
-					draw_k = 0.0
+					_reset_draw()
 					Net.play("bow")
 			"melee":
-				if lmb and atk_cd <= 0.0 and not blocking:
+				if _melee_hold():
+					# Warrior: удар при ВІДПУСКАННІ ЛКМ; якщо тримати 1.5 с - Power Strike
+					if wait_release:
+						if not lmb:
+							wait_release = false
+					elif blocking:
+						charging = false
+						hold_t = 0.0
+					elif lmb:
+						if atk_cd <= 0.0 or charging:
+							charging = true
+							hold_t += dt
+							if hold_t >= _hold_time() and hold_ready():
+								_fire_volley(adir)
+								atk_cd = 0.6
+								atk_t = 0.3
+								atk_dur = 0.3
+								charging = false
+								hold_t = 0.0
+								wait_release = true
+					elif charging:
+						charging = false
+						hold_t = 0.0
+						if atk_cd <= 0.0:
+							_swing(tool, td, adir)
+				elif lmb and atk_cd <= 0.0 and not blocking:
 					_swing(tool, td, adir)
 			_:
 				if lmb and act_cd <= 0.0 and _in_reach(cell):
@@ -498,14 +561,6 @@ func _draw() -> void:
 		off = Vector2(0, k * 9.0)
 		var dk := 1.0 - 0.35 * k
 		tint = Color(tint.r * dk, tint.g * dk, tint.b * dk, clampf(2.2 - death_t, 0.0, 1.0))
-	if has_buff("barrier"):
-		draw_circle(Vector2.ZERO, 18.0, Color(0.4, 0.7, 1.0, 0.16))
-		draw_arc(Vector2.ZERO, 18.0, 0.0, TAU, 24, Color(0.6, 0.85, 1.0, 0.6), 1.0)
-	if has_buff("rage"):
-		draw_circle(Vector2(0, 2), 15.0, Color(1.0, 0.25, 0.1, 0.14 + 0.06 * sin(anim_t * 10.0)))
-	if has_buff("haste"):
-		for i in 3:
-			draw_line(Vector2(-face * (9 + i * 3), -6 + i * 6), Vector2(-face * (15 + i * 3), -6 + i * 6), Color(0.6, 1.0, 0.6, 0.5), 1.0)
 	var tool := "" if dead else cur_tool()
 	var sheet = Net.tex("res://assets/characters/%s_%s.png" % [cls, "blue" if team == 0 else "red"])
 	if bool(look.classic) and sheet:
@@ -558,3 +613,13 @@ func _draw() -> void:
 				draw_rect(Rect2(to_local(p) - Vector2(1, 1), Vector2(2, 2)), Color(1, 1, 1, 0.6 * (1.0 - i / 30.0)))
 		draw_rect(Rect2(-10, -28, 20, 3), Color(0, 0, 0, 0.6))
 		draw_rect(Rect2(-10, -28, 20.0 * draw_k, 3), Color(1.0, 0.85, 0.3) if draw_k < 1.0 else Color(1.0, 0.4, 0.2))
+		# шкала Multi-shot: заповнюється за 2.5 с утримання ЛКМ
+		if hold_ready():
+			var vk := clampf(hold_t / _hold_time(), 0.0, 1.0)
+			draw_rect(Rect2(-10, -32, 20, 3), Color(0, 0, 0, 0.6))
+			draw_rect(Rect2(-10, -32, 20.0 * vk, 3), Color(0.55, 0.85, 1.0))
+	# шкала Power Strike (Warrior тримає ЛКМ)
+	if charging and hold_ready():
+		var sk := clampf(hold_t / _hold_time(), 0.0, 1.0)
+		draw_rect(Rect2(-10, -28, 20, 3), Color(0, 0, 0, 0.6))
+		draw_rect(Rect2(-10, -28, 20.0 * sk, 3), Color(1.0, 0.55, 0.2) if sk < 1.0 else Color(1.0, 0.25, 0.15))

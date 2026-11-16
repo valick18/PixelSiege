@@ -2,10 +2,11 @@ extends Node2D
 # Матч (оркестратор). Хост (peer 1) авторитетний. Ігрова логіка рознесена по менеджерах (scripts/managers):
 #   CombatManager       - бій, стріли, здібності, бафи, пастки
 #   BuildingManager     - копання, будівництво, робочі столи, крафт, сховище, інвентар, відновлення ресурсів
-#   FireExplosionSystem - вогонь, вибухи, катапульта, блискавки
+#   FireExplosionSystem - вогонь, вибухи, катапульта
 #   FlagManager         - прапори, рахунок, кінець матчу
 #   SaveManager         - збереження матчу
-# Тут залишились: життєвий цикл матчу, мережеві RPC (точки входу запитів і розсилка стану), погода, ефекти, HUD і вікна.
+# Тут залишились: життєвий цикл матчу, мережеві RPC (точки входу запитів і розсилка стану), вітер, ефекти, HUD і вікна.
+# Погода: дощ, гроза і туман прибрані з гри, погода завжди ясна (змінюється лише вітер).
 
 const T := 16
 const PREP_TIME := 120.0
@@ -28,7 +29,7 @@ const CraftUIS = preload("res://scripts/ui/craft_ui.gd")
 const InvUIS = preload("res://scripts/ui/inventory_ui.gd")
 const TeamUIS = preload("res://scripts/ui/team_select.gd")
 const ClassUIS = preload("res://scripts/ui/class_select.gd")
-const HELP_TEXT := "WASD move | Space jump | S+Space drop through platform | Shift run | Ctrl crouch\n1-3 tools | 4-0 items | Wheel switch | LMB attack / dig / place (hold LMB to draw the bow) | RMB block / tool swing\nX block (tap right before a hit = parry) | Z dodge | Q R F abilities | E use: workbench, catapult, ballista, hatch, chest, storage | G take from storage\nC craft | Tab inventory | B class | M team | F1-F4 quick class | Esc menu"
+const HELP_TEXT := "WASD move | Space jump | S+Space drop through platform | Shift run | Ctrl crouch\n1-3 tools | 4-0 items | Wheel switch | LMB attack / dig / place (hold LMB to draw the bow) | RMB block / tool swing\nAbilities: Warrior hold LMB 1.5 s = Power Strike (normal hit on release) | Archer hold LMB 2.5 s = Multi-shot | Builder: none\nArrows refill to 20 at your spawn point or workbench | Back walls (craft: Wall) hold blocks in front of them\nX block (tap right before a hit = parry) | Z dodge | E use: workbench, catapult, ballista, hatch, chest, storage | G take from storage\nC craft | Tab inventory | B class | M team | F1-F3 quick class | Esc menu"
 
 var world
 var players_root: Node2D
@@ -53,6 +54,7 @@ var arrows := {}      # усі: id -> {p, v, k, team, g, life, stuck}
 var arrow_meta := {}  # host: id -> {src, dmg}
 var arrow_id := 1
 var cracks := {}      # усі: cell -> 0..1
+var wall_edits := {}  # усі: cell -> 0/1 (зміни задніх стін відносно згенерованого світу)
 var store := [{"wood": 0, "stone": 0, "metal": 0}, {"wood": 0, "stone": 0, "metal": 0}]
 var score := [0, 0]
 var winner := -1
@@ -62,19 +64,20 @@ var prep_left := PREP_TIME
 var match_time := 0.0
 var match_over := false
 var respawn_at := 0.0
-var weather := "clear"
+var weather := "clear"  # завжди "clear": дощу, грози і туману більше немає
 var wind := 0.0
 var flash := 0.0
 var fx := []
 var note := ""
 var note_t := 0.0
 var ui_open := false
-var weather_t := 40.0
+var weather_t := 40.0   # таймер зміни вітру
 var supply_t := 90.0
 var check_t := 0.0
 var t_pick := 0.0
 var t_sync := 0.0
-var rain_k := 1.0
+var t_refill := 0.0
+var rain_k := 1.0       # 1 = гравець під відкритим небом (для променів світла), 0 = під дахом / під землею
 var daylight := 1.0
 var help_t := 25.0
 var help_on := false
@@ -173,6 +176,25 @@ func send_edits(list: Array) -> void:
 		physics.after_edits(list, olds)
 
 
+# Задні стіни (world.bg): 1 = є стіна. Стіна тримає блоки перед собою (див. WorldPhysics).
+func has_wall(c: Vector2i) -> bool:
+	if c.x < 0 or c.y < 0 or c.x >= world.w or c.y >= world.h:
+		return false
+	return world.bg[c.y * world.w + c.x] == 1
+
+
+func _set_wall(c: Vector2i, v: int) -> void:
+	if c.x < 0 or c.y < 0 or c.x >= world.w or c.y >= world.h:
+		return
+	world.bg[c.y * world.w + c.x] = v
+
+
+func send_walls(list: Array) -> void:
+	c_walls.rpc(list)
+	if multiplayer.is_server():
+		physics.after_walls(list)
+
+
 # Видаляє клітинки (двері видаляються цілком: нижня + верхня клітинка).
 func remove_cells(cells: Array) -> void:
 	var list := []
@@ -209,7 +231,7 @@ func _kit(cname: String) -> Array:
 
 
 func _new_state(cname: String = "warrior") -> Dictionary:
-	return {"hp": 100, "inv": _kit(cname), "dead_until": 0.0, "atk": 0.0, "dig": 0.0, "use": 0.0, "dodge": 0.0, "block": false, "block_since": 0.0, "inv_until": 0.0, "last_pos": Vector2.ZERO, "k": 0, "d": 0, "c": 0, "combo": 0, "last_swing": 0.0, "buffs": {}, "ab0": 0.0, "ab1": 0.0, "ab2": 0.0, "team_set": false, "cls_set": false}
+	return {"hp": 100, "inv": _kit(cname), "dead_until": 0.0, "atk": 0.0, "dig": 0.0, "use": 0.0, "dodge": 0.0, "block": false, "block_since": 0.0, "inv_until": 0.0, "last_pos": Vector2.ZERO, "k": 0, "d": 0, "c": 0, "combo": 0, "last_swing": 0.0, "buffs": {}, "ab0": 0.0, "team_set": false, "cls_set": false}
 
 
 # ------------------------------------------------------------ життєвий цикл матчу
@@ -222,6 +244,7 @@ func _start_match(seed_value: int, size: int) -> void:
 	arrows.clear()
 	arrow_meta.clear()
 	cracks.clear()
+	wall_edits.clear()
 	building.reset()
 	physics.reset()
 	falling.clear()
@@ -538,7 +561,7 @@ func req_sync() -> void:
 	var snap := {}
 	for id in st:
 		snap[id] = {"hp": st[id].hp, "inv": st[id].inv.duplicate(true), "dead": st[id].dead_until > 0.0}
-	var d := {"edits": edits, "score": score, "flags": flags, "prep": prep_left, "mt": match_time, "cl": snap, "win": winner, "fire": world.fire.keys(), "drops": drops, "store": store, "weather": weather, "wind": wind, "rows": end_rows, "trees": world.trees}
+	var d := {"edits": edits, "score": score, "flags": flags, "prep": prep_left, "mt": match_time, "cl": snap, "win": winner, "fire": world.fire.keys(), "drops": drops, "store": store, "weather": weather, "wind": wind, "rows": end_rows, "trees": world.trees, "walls": wall_edits}
 	c_full.rpc_id(_sid(), d)
 
 
@@ -548,6 +571,9 @@ func c_full(d: Dictionary) -> void:
 	for c in edits:
 		world.set_cell(c, edits[c][0], edits[c][1])
 	world.trees = d.trees
+	wall_edits = d.get("walls", {})
+	for c in wall_edits:
+		_set_wall(c, int(wall_edits[c]))
 	score = d.score
 	flags = d.flags
 	prep_left = d.prep
@@ -557,7 +583,7 @@ func c_full(d: Dictionary) -> void:
 	match_over = winner >= 0
 	drops = d.drops
 	store = d.store
-	weather = d.weather
+	weather = "clear"
 	wind = d.wind
 	end_rows = d.rows
 	world.fire.clear()
@@ -614,13 +640,35 @@ func c_edits(list: Array) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
+func c_walls(list: Array) -> void:
+	for e in list:
+		var c: Vector2i = e[0]
+		var v: int = int(e[1])
+		if v == 0 and has_wall(c) and fx.size() < 150:
+			for k in 3:
+				fx.append({"k": "deb", "a": Vector2(c) * T + Vector2(randf_range(2, 14), randf_range(2, 14)), "v": Vector2(randf_range(-30, 30), randf_range(-60, -10)), "c": Color(0.42, 0.36, 0.34), "t": 0.5})
+		wall_edits[c] = v
+		_set_wall(c, v)
+	if not list.is_empty():
+		Net.play("place" if int(list[0][1]) != 0 else "dig")
+
+
+# Блок, що впав з великої висоти, розбивається на уламки.
+@rpc("authority", "call_local", "reliable")
+func c_shatter(pos: Vector2, b: int) -> void:
+	var dc: Color = world.COLORS.get(b, Color.GRAY)
+	for k in 8:
+		fx.append({"k": "deb", "a": pos + Vector2(randf_range(-6, 6), randf_range(-4, 6)), "v": Vector2(randf_range(-90, 90), randf_range(-150, -40)), "c": dc, "t": 0.7})
+
+
+@rpc("authority", "call_local", "reliable")
 func c_knock(id: int, v: Vector2) -> void:
 	var p = player_node(id)
 	if p and p.is_multiplayer_authority():
 		p.apply_knock(v)
 
 
-# kind: 0 удар по дузі, 1 лінія, 2 вихор, 3 баф-хвиля, 4 лікування / ремонт
+# kind: 0 удар по дузі, 1 лінія, 2 вихор, 3 ударна хвиля (Power Strike), 4 лікування / ремонт
 @rpc("authority", "call_local", "unreliable")
 func c_fx(a: Vector2, b: Vector2, kind: int) -> void:
 	match kind:
@@ -691,9 +739,10 @@ func c_store(s: Array) -> void:
 	store = s
 
 
+# Погода завжди ясна (дощ / гроза / туман прибрані), передається лише вітер.
 @rpc("authority", "call_local", "reliable")
-func c_weather(kind: String, w: float) -> void:
-	weather = kind
+func c_weather(_kind: String, w: float) -> void:
+	weather = "clear"
 	wind = w
 
 
@@ -762,7 +811,7 @@ func c_dmg(pos: Vector2, n: int) -> void:
 
 @rpc("authority", "call_local", "reliable")
 func c_fall(fid: int, pos: Vector2, b: int) -> void:
-	falling[fid] = {"p": pos, "vy": 0.0, "b": b, "hit": {}}
+	falling[fid] = {"p": pos, "y0": pos.y, "vy": 0.0, "b": b, "hit": {}}
 
 
 @rpc("authority", "call_local", "reliable")
@@ -801,6 +850,35 @@ func _pickups() -> void:
 			d.n = left
 	if changed:
 		c_drops.rpc(drops)
+
+
+# Поповнення стріл до ARROW_REFILL біля своєї бази / точки спавна / робочого столу.
+func _at_refill_point(team: int, pos: Vector2) -> bool:
+	if pos.distance_to(world.flag_pos(team)) < 110.0:
+		return true
+	for c in structs:
+		var sc = structs[c]
+		if (sc.type == "spawn" or sc.type == "workbench") and int(sc.team) == team and pos.distance_to(Vector2(c) * T + Vector2(8, 8)) < 64.0:
+			return true
+	return false
+
+
+func _refill_arrows() -> void:
+	for id in st:
+		var s = st[id]
+		if s.dead_until > 0.0 or not Net.players.has(id) or not "bow" in Net.tools_of(Net.players[id].cls):
+			continue
+		var have := InvS.count(s.inv, "arrow")
+		if have >= Net.ARROW_REFILL:
+			continue
+		var q = player_node(id)
+		if q == null or not _at_refill_point(int(Net.players[id].team), q.position):
+			continue
+		var want: int = Net.ARROW_REFILL - have
+		var left := InvS.add(s.inv, "arrow", want)
+		if left < want:
+			push_state(id)
+			note_to(id, "Arrows refilled: %d" % (have + want - left))
 
 
 func _exposed(c: Vector2i) -> bool:
@@ -855,6 +933,10 @@ func _physics_process(dt: float) -> void:
 	building.tick(dt)
 	saver.tick(dt)
 	physics.tick(dt)
+	t_refill += dt
+	if t_refill >= 1.0:
+		t_refill = 0.0
+		_refill_arrows()
 	t_pick += dt
 	if t_pick >= 0.2:
 		t_pick = 0.0
@@ -872,11 +954,11 @@ func _physics_process(dt: float) -> void:
 				c_tp.rpc(id, st[id].last_pos)
 			else:
 				st[id].last_pos = q.position
+	# лише зміна вітру: дощу, грози й туману в грі більше немає
 	weather_t -= dt
 	if weather_t <= 0.0:
 		weather_t = randf_range(60.0, 120.0)
-		var kinds := ["clear", "clear", "rain", "fog", "storm"]
-		c_weather.rpc(kinds[randi() % kinds.size()], randf_range(-1.0, 1.0))
+		c_weather.rpc("clear", randf_range(-1.0, 1.0))
 	if prep_left <= 0.0 and not match_over:
 		supply_t -= dt
 		if supply_t <= 0.0:
@@ -899,10 +981,6 @@ func _process(dt: float) -> void:
 	var f := tt * 4.0
 	var ki := clampi(int(f), 0, 3)
 	var col: Color = keys[ki].lerp(keys[ki + 1], smoothstep(0.0, 1.0, f - ki))
-	if weather == "storm":
-		col = col.darkened(0.25)
-	elif weather == "rain" or weather == "fog":
-		col = col.darkened(0.1)
 	mod.color = col
 	daylight = clampf(inverse_lerp(0.4, 0.95, (col.r + col.g + col.b) / 3.0), 0.0, 1.0)
 	help_t = maxf(0.0, help_t - dt)
@@ -916,7 +994,11 @@ func _process(dt: float) -> void:
 	_update_hud()
 
 
+# Позиція реальної (згладженої) камери: фон малюється відносно неї, тому не смикається при ходьбі / стрибках.
 func _cam_pos() -> Vector2:
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		return cam.get_screen_center_position()
 	var p = player_node(multiplayer.get_unique_id())
 	return p.position if p else Vector2(world.w * T * 0.5, 0)
 
@@ -1077,7 +1159,12 @@ func _draw_fx() -> void:
 
 
 func _draw_block(ci: CanvasItem, b: int, r: Rect2) -> void:
-	if b == world.DIRT and world.tex_dirt:
+	if b == physics.WALL_FALL:
+		if world.tex_wall:
+			ci.draw_texture_rect_region(world.tex_wall, r, Rect2(0, 0, 16, 16), Color(0.85, 0.85, 0.9))
+		else:
+			ci.draw_rect(r, Color(0.42, 0.36, 0.34))
+	elif b == world.DIRT and world.tex_dirt:
 		ci.draw_texture_rect_region(world.tex_dirt, r, Rect2(15 * 64, 64, 16, 16))
 	elif (b == world.STONE or b == world.ORE) and world.tex_stone:
 		ci.draw_texture_rect_region(world.tex_stone, r, Rect2(15 * 64, 0, 16, 16))
@@ -1171,6 +1258,9 @@ func _show(wnd) -> void:
 	wnd.visible = true
 	if wnd.has_method("open"):
 		wnd.open()
+	# вікно стискається до свого вмісту і ставиться по центру (щоб не розтягувалось на весь екран)
+	wnd.reset_size()
+	_center(wnd)
 	_refresh_ui_flag()
 
 
@@ -1246,7 +1336,7 @@ func _update_hud() -> void:
 		extra += "\nSteam lobby: steam:%d" % Net.steam_lobby
 	hud_help.visible = help_on or help_t > 0.0
 	hud_help.text = HELP_TEXT + extra + "\n[H] hide / show help"
-	hud_help.size = Vector2(420, 140)
+	hud_help.size = Vector2(420, 160)
 	hud_help.position = Vector2(12, 92)
 	var s_: Dictionary = store[team]
 	hud_store.text = "Team storage: wood %d  stone %d  metal %d" % [s_.wood, s_.stone, s_.metal]

@@ -10,47 +10,36 @@ const REACH := 90.0
 const HOTBAR := 7        # слоти предметів на панелі (клавіші 4-0)
 const INV_SIZE := 21     # 7 на панелі + 14 у рюкзаку (Tab)
 const TOOL_SLOTS := 3    # окремі слоти інструментів (клавіші 1-3)
+const VOLLEY_HOLD := 2.5 # скільки секунд тримати ЛКМ з луком для залпу декількома стрілами
+const STRIKE_HOLD := 1.5 # скільки секунд тримати ЛКМ зі зброєю ближнього бою для сильного удару (Warrior)
+const ARROW_REFILL := 20 # стріл на старті / після респавну; до цієї кількості поповнюються біля точки спавна або робочого столу
 
+# Три класи, у кожного не більше однієї здібності:
+#   Warrior  - Power Strike: затиснути ЛКМ зі зброєю на 1.5 с -> сильний удар (звичайний удар - коли відпускаєте ЛКМ)
+#   Archer   - Multi-shot: затиснути ЛКМ з луком на 2.5 с -> віяло з 5 стріл ("hold": true, клавіші немає)
+#   Builder  - без здібностей
 const CLASSES := {
 	"warrior": {
 		"label": "Warrior", "color": Color("b03a2e"),
 		"role": "Front-line fighter. Sword combos, spear reach, breaks enemy lines.",
 		"tools": ["sword", "spear"],
 		"abilities": [
-			{"name": "Charge", "cd": 8.0, "desc": "Dash forward, hitting enemies on the way"},
-			{"name": "Whirlwind", "cd": 12.0, "desc": "Spin attack that hits everyone around you"},
-			{"name": "War Cry", "cd": 25.0, "desc": "+50% damage for you and nearby allies (6 s)"},
+			{"name": "Power Strike", "short": "Strike", "key": "LMB", "hold": true, "hold_time": STRIKE_HOLD, "cd": 8.0, "desc": "Hold LMB with a weapon for 1.5 s: heavy blow, 45 damage, ignores block, huge knockback. Normal attacks happen when you release LMB"},
 		],
 	},
 	"archer": {
 		"label": "Archer", "color": Color("1e8449"),
-		"role": "Ranged damage. Hold LMB to draw the bow, release to shoot.",
+		"role": "Ranged damage. Hold LMB to draw the bow, release to shoot. Arrows refill to 20 at a spawn point or a workbench.",
 		"tools": ["bow", "dagger"],
 		"abilities": [
-			{"name": "Backflip", "cd": 8.0, "desc": "Leap back away from the enemy"},
-			{"name": "Volley", "cd": 12.0, "desc": "Shoot a fan of 5 arrows"},
-			{"name": "Fire Arrow", "cd": 18.0, "desc": "An arrow that sets wooden things on fire"},
+			{"name": "Multi-shot", "short": "Volley", "key": "LMB", "hold": true, "hold_time": VOLLEY_HOLD, "cd": 6.0, "desc": "Hold LMB with the bow for 2.5 s to shoot a fan of 5 arrows"},
 		],
 	},
 	"engineer": {
 		"label": "Builder", "color": Color("ca6f1e"),
-		"role": "The only class with a pickaxe and an axe: mines blocks, chops trees, builds the base.",
+		"role": "The only class with a pickaxe and an axe: mines blocks, chops trees, builds the base. No abilities.",
 		"tools": ["pickaxe", "axe", "hammer"],
-		"abilities": [
-			{"name": "Bridge", "cd": 10.0, "desc": "Build a 5-block wooden bridge (uses wood)"},
-			{"name": "Stone Wall", "cd": 14.0, "desc": "Raise a 3-block stone wall in front (uses stone)"},
-			{"name": "Repair", "cd": 20.0, "desc": "Fully repair blocks and structures nearby"},
-		],
-	},
-	"support": {
-		"label": "Support", "color": Color("7d3c98"),
-		"role": "Keeps the team alive: heals, speeds up and shields allies.",
-		"tools": ["mace"],
-		"abilities": [
-			{"name": "Heal Aura", "cd": 15.0, "desc": "Heal allies around you by 30"},
-			{"name": "Haste", "cd": 18.0, "desc": "+40% move speed for nearby allies (5 s)"},
-			{"name": "Barrier", "cd": 25.0, "desc": "Nearby allies take 60% less damage (5 s)"},
-		],
+		"abilities": [],
 	},
 }
 
@@ -59,7 +48,6 @@ const TOOLS := {
 	"sword": {"label": "Sword", "kind": "melee", "dmg": 22, "range": 40.0, "arc": 120.0, "cd": 0.42, "kb": 190.0},
 	"spear": {"label": "Spear", "kind": "melee", "dmg": 18, "range": 60.0, "arc": 45.0, "cd": 0.6, "kb": 240.0},
 	"dagger": {"label": "Dagger", "kind": "melee", "dmg": 11, "range": 30.0, "arc": 130.0, "cd": 0.28, "kb": 110.0},
-	"mace": {"label": "Mace", "kind": "melee", "dmg": 15, "range": 36.0, "arc": 110.0, "cd": 0.55, "kb": 230.0},
 	"hammer": {"label": "Hammer", "kind": "melee", "dmg": 12, "range": 34.0, "arc": 110.0, "cd": 0.5, "kb": 200.0},
 	"pickaxe": {"label": "Pickaxe", "kind": "dig", "dmg": 7, "range": 32.0, "arc": 100.0, "cd": 0.5, "kb": 100.0, "power": 2, "dig_cd": 0.22},
 	"axe": {"label": "Axe", "kind": "chop", "dmg": 10, "range": 34.0, "arc": 100.0, "cd": 0.55, "kb": 140.0, "power": 2, "dig_cd": 0.25},
@@ -68,9 +56,8 @@ const TOOLS := {
 
 const KITS := {
 	"warrior": [["medkit", 1], ["food", 2]],
-	"archer": [["arrow", 40], ["food", 2], ["torch", 2]],
-	"engineer": [["wood", 20], ["stone", 10], ["platform", 6], ["torch", 2]],
-	"support": [["medkit", 3], ["food", 3]],
+	"archer": [["arrow", ARROW_REFILL], ["food", 2], ["torch", 2]],
+	"engineer": [["wood", 20], ["stone", 10], ["platform", 6], ["wall", 10], ["torch", 2]],
 }
 
 const TEAM_COLORS := [Color("2e86de"), Color("e74c3c")]
@@ -81,6 +68,7 @@ const CATEGORIES := ["All", "Building", "Defense", "Siege", "Light", "Consumable
 const RECIPES := {
 	"workbench": {"cost": {"wood": 10}, "n": 1, "station": "hand", "cat": "Stations", "desc": "Place it and press E to craft advanced items"},
 	"ladder": {"cost": {"wood": 2}, "n": 3, "station": "hand", "cat": "Building", "desc": "Climb with W/S"},
+	"wall": {"cost": {"stone": 1}, "n": 4, "station": "hand", "cat": "Building", "desc": "Back wall: blocks in front of a wall never collapse. Place it with LMB, break it with the pickaxe"},
 	"platform": {"cost": {"wood": 1}, "n": 3, "station": "hand", "cat": "Building", "desc": "One-way: jump up through it, S+Space to drop down"},
 	"torch": {"cost": {"wood": 1, "stone": 1}, "n": 4, "station": "hand", "cat": "Light", "desc": "Small warm light"},
 	"campfire": {"cost": {"wood": 5, "stone": 2}, "n": 1, "station": "hand", "cat": "Light", "desc": "Big light, slowly heals allies standing nearby"},
@@ -164,6 +152,10 @@ func tools_of(cname: String) -> Array:
 	return CLASSES.get(cname, CLASSES.warrior)["tools"]
 
 
+func abilities_of(cname: String) -> Array:
+	return CLASSES.get(cname, CLASSES.warrior)["abilities"]
+
+
 # ------------------------------------------------------------ settings / input / audio
 func load_settings() -> void:
 	var cf := ConfigFile.new()
@@ -244,7 +236,7 @@ func _setup_audio() -> void:
 		"thunder": _make_wav(45, 0.9, 0.8, 3), "fire": _make_wav(90, 0.15, 0.9, 20),
 		"swing": _make_wav(260, 0.09, 0.85, 30), "bow": _make_wav(520, 0.12, 0.3, 30),
 		"chop": _make_wav(200, 0.1, 0.5, 35), "death": _make_wav(110, 0.5, 0.4, 6),
-		"splash": _make_wav(80, 0.25, 0.95, 12),
+		"splash": _make_wav(80, 0.25, 0.95, 12), "smash": _make_wav(70, 0.3, 0.75, 10),
 	}
 	for i in 10:
 		var p := AudioStreamPlayer.new()
@@ -501,6 +493,8 @@ func reg(pname: String, pw: String, look: Dictionary = {}) -> void:
 	if memory.has(pname):
 		team = memory[pname].team
 		cls = memory[pname].cls
+		if not CLASSES.has(cls):
+			cls = "warrior"
 	else:
 		var c := team_counts()
 		team = 0 if c[0] <= c[1] else 1

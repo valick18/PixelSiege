@@ -1,6 +1,7 @@
 extends PanelContainer
 # Вікно інвентаря (Tab / I): інструменти класу (тільки перегляд), 7 слотів панелі + 14 слотів рюкзака.
 # ЛКМ по слоту - взяти, ЛКМ по іншому - переставити / об'єднати. ПКМ або кнопка Drop - викинути на землю.
+# Кнопка "Crafting (C)" відкриває вікно крафту.
 
 const LookS = preload("res://scripts/look.gd")
 const CraftS = preload("res://scripts/ui/craft_ui.gd")
@@ -52,7 +53,7 @@ func _ready() -> void:
 	root.add_child(info_l)
 	var hb := HBoxContainer.new()
 	root.add_child(hb)
-	for it in [["Drop selected", _drop_sel], ["Sort backpack", func(): game.send_sort()], ["Close", func(): visible = false; game._refresh_ui_flag()]]:
+	for it in [["Crafting (C)", func(): game._show(game.craft_ui)], ["Drop selected", _drop_sel], ["Sort backpack", func(): game.send_sort()], ["Close", func(): visible = false; game._refresh_ui_flag()]]:
 		var b2 := Button.new()
 		b2.text = it[0]
 		b2.focus_mode = Control.FOCUS_NONE
@@ -121,7 +122,8 @@ func _refresh() -> void:
 		var names := []
 		for tl in Net.tools_of(p.cls):
 			names.append(Net.TOOLS[tl].label)
-		tools_l.text = "%s tools (keys 1-3): %s" % [Net.CLASSES[p.cls].label, ", ".join(PackedStringArray(names))]
+		var cname: String = Net.CLASSES[p.cls].label if Net.CLASSES.has(p.cls) else String(p.cls).capitalize()
+		tools_l.text = "%s tools (keys 1-3): %s" % [cname, ", ".join(PackedStringArray(names))]
 	var inv := _inv()
 	for i in slots.size():
 		var b: Button = slots[i][0]

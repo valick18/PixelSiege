@@ -7,7 +7,7 @@ signal closed
 const LookS = preload("res://scripts/look.gd")
 const CraftS = preload("res://scripts/ui/craft_ui.gd")
 const ROWS := [["skin", "Skin"], ["hair", "Hair style"], ["hair_col", "Hair color"], ["eyes", "Eyes"], ["shirt", "Shirt"], ["pants", "Pants"], ["boots", "Boots"], ["hat", "Headwear"], ["beard", "Beard"]]
-const CLS := ["warrior", "archer", "engineer", "support"]
+const CLS := ["warrior", "archer", "engineer"]
 var look := {}
 var prev_cls := "warrior"
 var prev_team := 0

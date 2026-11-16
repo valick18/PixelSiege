@@ -1,11 +1,16 @@
 extends Node
-# CombatManager: удари по дузі (меч, спис, кинджал, булава...), комбо з 3 ударів, лук з натягом і фізичні стріли,
-# здібності класів (Q / R / F), бафи, шипи, настінні пастки, балісти, шкода і смерть.
+# CombatManager: удари по дузі (меч, спис, кинджал, молот...), комбо з 3 ударів, лук з натягом і фізичні стріли,
+# здібності класів (по одній: Warrior - Power Strike на Q, Archer - Multi-shot при утриманні ЛКМ 2.5 с,
+# Builder - без здібностей), шипи, настінні пастки, балісти, шкода і смерть.
 # Всі рішення приймає хост; стріли симулюються на всіх пірах однаково (для плавності), але влучання рахує лише хост.
 
 const InvS = preload("res://scripts/inventory.gd")
 const T := 16
 const ARROW_G := 420.0
+const STRIKE_DMG := 45
+const STRIKE_RANGE := 54.0
+const STRIKE_ARC := 140.0
+const VOLLEY_ARROWS := 5
 
 var g  # game.gd
 var t_spk := 0.0
@@ -227,160 +232,92 @@ func fire_ballista(id: int, cell: Vector2i, dir: Vector2) -> void:
 	g.c_sfx.rpc("bow")
 
 
-# ------------------------------------------------------------ здібності Q / R / F
+# ------------------------------------------------------------ здібності (по одній на клас)
+# Warrior: Power Strike (Q). Archer: Multi-shot (клієнт надсилає після утримання ЛКМ 2.5 с з луком).
+# Builder: здібностей немає.
 func ability(id: int, idx: int, dir: Vector2) -> void:
 	var a = g.actor(id)
 	if a == null or g.match_over:
 		return
 	var s = a[0]
 	var p = a[1]
-	idx = clampi(idx, 0, 2)
+	var cname: String = Net.players[id].cls
+	var abl: Array = Net.abilities_of(cname)
+	if idx < 0 or idx >= abl.size():
+		return
 	var now: float = g.now()
 	var key := "ab%d" % idx
 	if now < float(s.get(key, 0.0)):
 		return
-	var cname: String = Net.players[id].cls
 	if dir == Vector2.ZERO:
 		dir = Vector2.RIGHT
 	dir = dir.normalized()
-	var sgn := 1.0 if dir.x >= 0.0 else -1.0
-	var team := _team(id)
-	var ok := true
-	match "%s%d" % [cname, idx]:
-		"warrior0":
-			g.c_knock.rpc(id, Vector2(sgn * 380.0, -60.0))
-			_area_hits(id, p.position + Vector2(sgn * 40.0, 0), 44.0, 15, Vector2(sgn * 260.0, -140.0), false)
-		"warrior1":
-			_area_hits(id, p.position, 48.0, 18, Vector2(240.0, -120.0), true)
-			g.c_fx.rpc(p.position, p.position + Vector2(48, 0), 2)
-		"warrior2":
-			_team_buff(id, p.position, 110.0, "rage", 6.0)
-			g.c_fx.rpc(p.position, p.position + Vector2(110, 0), 3)
-		"archer0":
-			g.c_knock.rpc(id, Vector2(-sgn * 220.0, -280.0))
-		"archer1":
-			var na := InvS.take(s.inv, "arrow", 5)
-			if na == 0:
-				g.note_to(id, "No arrows for Volley")
-				ok = false
-			else:
-				for i in na:
-					var d := Vector2.from_angle(dir.angle() + (i - (na - 1) * 0.5) * 0.09)
-					spawn_arrow(_bow_origin(p, d), d * 520.0, 0, team, id, 10)
-				g.push_state(id)
-				g.c_sfx.rpc("bow")
-		"archer2":
-			if InvS.take(s.inv, "arrow", 1) == 0:
-				g.note_to(id, "No arrows for Fire Arrow")
-				ok = false
-			else:
-				spawn_arrow(_bow_origin(p, dir), dir * 620.0, 1, team, id, 18)
-				g.push_state(id)
-				g.c_sfx.rpc("fire")
-		"engineer0":
-			ok = _bridge(id, s, p, int(sgn))
-		"engineer1":
-			ok = _wall(id, s, p, int(sgn))
-		"engineer2":
-			var n := 0
-			for c in g.block_hp.keys():
-				var ow = g.world.owner_team.get(c)
-				if (ow == null or int(ow) == team) and p.position.distance_to(Vector2(c) * T + Vector2(8, 8)) < 96.0:
-					g.block_hp.erase(c)
-					g.c_crack.rpc(c, 0.0)
-					n += 1
-			g.c_fx.rpc(p.position, p.position + Vector2(96, 0), 4)
-			g.note_to(id, "Repaired %d blocks" % n)
-		"support0":
-			for oid in g.st:
-				if _team(oid) != team or g.st[oid].dead_until > 0.0:
-					continue
-				var q = g.player_node(oid)
-				if q and q.position.distance_to(p.position) < 90.0:
-					g.st[oid].hp = mini(100, int(g.st[oid].hp) + 30)
-					g.push_state(oid)
-			g.c_fx.rpc(p.position, p.position + Vector2(90, 0), 4)
-		"support1":
-			_team_buff(id, p.position, 110.0, "haste", 5.0)
-			g.c_fx.rpc(p.position, p.position + Vector2(110, 0), 3)
-		"support2":
-			_team_buff(id, p.position, 110.0, "barrier", 5.0)
-			g.c_fx.rpc(p.position, p.position + Vector2(110, 0), 3)
-		_:
-			ok = false
+	var ok := false
+	match cname:
+		"warrior":
+			ok = _power_strike(id, s, p, dir)
+		"archer":
+			ok = _volley(id, s, p, dir)
 	if ok:
-		s[key] = now + float(Net.CLASSES[cname].abilities[idx].cd)
+		s[key] = now + float(abl[idx].cd)
 
 
-func _area_hits(id: int, center: Vector2, radius: float, dmg: int, kb: Vector2, outward: bool) -> void:
-	if g.prep_left > 0.0:
-		return
-	var my := _team(id)
-	for e in _enemies_of(id):
-		var q = e[1]
-		if q.position.distance_to(center) > radius or g.world.ray_blocked(center, q.position, my):
-			continue
-		var k := kb
-		if outward:
-			k = Vector2(signf(q.position.x - center.x) * kb.x, kb.y)
-		damage(e[0], int(dmg * dmg_mult(id)), k, id, true)
-
-
-func _team_buff(id: int, pos: Vector2, r: float, n: String, dur: float) -> void:
-	var my := _team(id)
-	for oid in g.st:
-		if _team(oid) != my or g.st[oid].dead_until > 0.0:
-			continue
-		var q = g.player_node(oid)
-		if q and q.position.distance_to(pos) < r:
-			add_buff(oid, n, dur)
-
-
-func _bridge(id: int, s, p, sgn: int) -> bool:
-	var w = g.world
-	var row := floori((p.position.y + 14.5) / T)
-	var list := []
-	for i in range(1, 6):
-		if InvS.count(s.inv, "wood") - list.size() < 1:
-			break
-		var c := Vector2i(floori(p.position.x / T) + sgn * i, row)
-		var b: int = w.get_cell(c)
-		if b == w.AIR or b == w.WATER:
-			list.append([c, w.WOOD, -1])
-	if list.is_empty():
-		g.note_to(id, "Bridge needs wood and free space")
+# Сильний удар: широка дуга перед воїном, 45 шкоди (x1.5 з rage), ігнорує блок і парирування,
+# сильне відкидання, ламає ворожі споруди.
+func _power_strike(id: int, s, p, dir: Vector2) -> bool:
+	var now: float = g.now()
+	if s.block:
 		return false
-	InvS.take(s.inv, "wood", list.size())
-	g.send_edits(list)
-	g.push_state(id)
+	s.atk = now + 0.6
+	var origin: Vector2 = p.position + Vector2(0, -2)
+	var sgn := 1.0 if dir.x >= 0.0 else -1.0
+	g.c_knock.rpc(id, Vector2(sgn * 150.0, -30.0))
+	g.c_anim.rpc(id, 0)
+	g.c_fx.rpc(origin, origin + dir * STRIKE_RANGE, 0)
+	g.c_fx.rpc(origin + dir * 22.0, origin + dir * 22.0 + Vector2(STRIKE_RANGE * 0.7, 0), 3)
+	g.c_sfx.rpc("smash")
+	var my := _team(id)
+	var hit := false
+	if g.prep_left <= 0.0:
+		var half_arc := deg_to_rad(STRIKE_ARC * 0.5)
+		for e in _enemies_of(id):
+			var q = e[1]
+			var rel: Vector2 = q.position - origin
+			var dist := rel.length()
+			if dist > STRIKE_RANGE + 12.0:
+				continue
+			if dist > 14.0 and absf(rel.angle_to(dir)) > half_arc:
+				continue
+			if g.world.ray_blocked(origin, q.position, my):
+				continue
+			damage(e[0], int(float(STRIKE_DMG) * dmg_mult(id)), dir * 430.0 + Vector2(0, -200), id, false)
+			hit = true
+	for d in [22.0, 38.0]:
+		var tc := Vector2i(floori((origin.x + dir.x * d) / T), floori((origin.y + dir.y * d) / T))
+		var owner = g.world.owner_team.get(tc)
+		if owner != null and int(owner) != my:
+			g.building.damage_block(tc, 6)
+	if hit:
+		g.c_sfx.rpc("hit")
 	return true
 
 
-func _wall(id: int, s, p, sgn: int) -> bool:
-	var w = g.world
-	var col := floori(p.position.x / T) + sgn * 2
-	var feet := floori((p.position.y + 13.0) / T)
-	var list := []
-	for k in 3:
-		if InvS.count(s.inv, "stone") - list.size() < 1:
-			break
-		var c := Vector2i(col, feet - k)
-		var b: int = w.get_cell(c)
-		if b != w.AIR and b != w.WATER:
-			continue
-		var cc := Vector2(c) * T + Vector2(8, 8)
-		var blocked := false
-		for q in g.players_root.get_children():
-			if absf(q.position.x - cc.x) < 14.0 and absf(q.position.y - cc.y) < 22.0:
-				blocked = true
-		if not blocked:
-			list.append([c, w.STONE, -1])
-	if list.is_empty():
-		g.note_to(id, "Stone Wall needs stone and free space")
+# Залп: віяло з 5 стріл (витрачає до 5 стріл з інвентаря).
+func _volley(id: int, s, p, dir: Vector2) -> bool:
+	if not "bow" in Net.tools_of(Net.players[id].cls):
 		return false
-	InvS.take(s.inv, "stone", list.size())
-	g.send_edits(list)
+	var na := InvS.take(s.inv, "arrow", VOLLEY_ARROWS)
+	if na == 0:
+		g.note_to(id, "No arrows for Multi-shot")
+		return false
+	var team := _team(id)
+	for i in na:
+		var d := Vector2.from_angle(dir.angle() + (i - (na - 1) * 0.5) * 0.09)
+		spawn_arrow(_bow_origin(p, d), d * 560.0, 0, team, id, 14)
+	s.atk = g.now() + 0.5
 	g.push_state(id)
+	g.c_anim.rpc(id, 0)
+	g.c_sfx.rpc("bow")
 	return true
 
 
@@ -407,8 +344,6 @@ func damage(oid: int, amount: int, kb: Vector2, src: int, blockable: bool, parry
 				return
 			amount = int(amount * 0.3)
 			kb *= 0.4
-	if has_buff(oid, "barrier"):
-		amount = int(amount * 0.4)
 	amount = maxi(1, amount)
 	s.hp = int(s.hp) - amount
 	g.c_knock.rpc(oid, kb)

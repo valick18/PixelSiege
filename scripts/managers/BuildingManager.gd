@@ -1,6 +1,6 @@
 extends Node
-# BuildingManager: копання (блоки - лише киркою, дерева - лише сокирою, обидва є тільки в Будівельника),
-# розміщення блоків і споруд, робочі столи та крафт, командне сховище, операції з інвентарем,
+# BuildingManager: копання (блоки і задні стіни - лише киркою, дерева - лише сокирою, обидва є тільки в Будівельника),
+# розміщення блоків, задніх стін і споруд, робочі столи та крафт, командне сховище, операції з інвентарем,
 # двері / люки / скрині руїн, відновлення дерев і руди, лікування біля багаття. Працює на хості.
 
 const InvS = preload("res://scripts/inventory.gd")
@@ -8,11 +8,13 @@ const T := 16
 const MAX_SPAWNS := 3
 const MAX_STORAGE := 2
 const STATION_RANGE := 60.0
+const WALL_HP := 3
 const LOOT := [["metal", 4, 8], ["stone", 6, 12], ["wood", 8, 16], ["medkit", 1, 2], ["tnt", 1, 2], ["firebomb", 1, 2], ["lantern", 1, 1], ["food", 2, 4]]
 
 var g
 var regrow_trees := {}  # x -> час
 var regrow_ore := {}    # cell -> час
+var wall_hp := {}       # cell -> міцність задньої стіни
 var t_regrow := 0.0
 var t_heal := 0.0
 var _hint_t := {}
@@ -21,6 +23,7 @@ var _hint_t := {}
 func reset() -> void:
 	regrow_trees.clear()
 	regrow_ore.clear()
+	wall_hp.clear()
 
 
 func hint(id: int, text: String) -> void:
@@ -67,11 +70,16 @@ func dig(id: int, cell: Vector2i, tool: String) -> void:
 		g.fire_sys.broadcast()
 		return
 	var b: int = w.get_cell(cell)
-	if b == w.AIR or b == w.BASE or b == w.WATER:
+	if b == w.BASE:
+		return
+	# задня стіна: ламається киркою, якщо перед нею немає блока
+	if b == w.AIR or b == w.WATER:
+		if kind == "dig" and g.has_wall(cell):
+			_dig_wall(id, s, p, cell, int(td.power))
 		return
 	var is_tree: bool = b in w.TREE_BLOCKS
 	if kind == "chop" and not is_tree:
-		hint(id, "The axe only chops trees. Use the pickaxe (1) for blocks")
+		hint(id, "The axe only chops trees. Use the pickaxe (1) for blocks and walls")
 		return
 	if kind == "dig" and is_tree:
 		hint(id, "Use the axe (2) to chop trees")
@@ -104,6 +112,20 @@ func dig(id: int, cell: Vector2i, tool: String) -> void:
 		regrow_ore[cell] = now + randf_range(180.0, 300.0)
 	if drop != "":
 		give(s, p, drop, 1)
+	g.push_state(id)
+
+
+func _dig_wall(id: int, s, p, cell: Vector2i, power: int) -> void:
+	var hp: int = int(wall_hp.get(cell, WALL_HP)) - power
+	g.c_sfx.rpc("dig")
+	if hp > 0:
+		wall_hp[cell] = hp
+		g.c_crack.rpc(cell, 1.0 - float(hp) / float(WALL_HP))
+		return
+	wall_hp.erase(cell)
+	g.c_crack.rpc(cell, 0.0)
+	g.send_walls([[cell, 0]])
+	give(s, p, "wall", 1)
 	g.push_state(id)
 
 
@@ -158,8 +180,25 @@ func use(id: int, cell: Vector2i, slot: int) -> void:
 		g.fire_sys.ignite_area(cell, 1, true)
 		g.push_state(id)
 		return
+	if item == "wall":
+		_place_wall(id, s, cell, slot)
+		return
 	if Net.ITEM_BLOCK.has(item):
 		_place(id, s, p, cell, slot, item)
+
+
+# Задня стіна: ставиться в будь-яку клітинку без твердого блока, де ще немає стіни.
+# Стіна без опори (не з'єднана через стіни / блоки з землею) одразу падає і повертається предметом.
+func _place_wall(id: int, s, cell: Vector2i, slot: int) -> void:
+	var w = g.world
+	if cell.y < 0 or cell.x < 0 or cell.x >= w.w or cell.y >= w.h - 1:
+		return
+	if g.has_wall(cell) or w.is_solid(cell.x, cell.y):
+		return
+	InvS.consume(s.inv, slot)
+	wall_hp.erase(cell)
+	g.send_walls([[cell, 1]])
+	g.push_state(id)
 
 
 func _place(id: int, s, p, cell: Vector2i, slot: int, item: String) -> void:
